@@ -1,0 +1,37 @@
+[project]
+name = "time-for-everything-backend"
+version = "0.1.0"
+description = "«Всё успею» MVP backend: FastAPI + SQLAlchemy + Supabase PostgreSQL/Auth"
+requires-python = ">=3.13,<3.14"
+# Exact pins; keep in sync with requirements.txt (runtime) and requirements-dev.txt.
+dependencies = [
+  "fastapi==0.142.2",
+  "starlette==1.7.0",
+  "uvicorn[standard]==0.54.0",
+  "sqlalchemy==2.1.3",
+  "psycopg[binary]==3.3.6",
+  "pydantic==2.13.5",
+  "pydantic-settings==2.15.0",
+  "httpx==0.28.1",
+  "pyjwt[crypto]==2.15.1",
+  "tzdata==2026.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.16.10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["postgres: requires TEST_DATABASE_URL pointing at a disposable PostgreSQL"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = ["S101", "B008", "S311"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S108"]

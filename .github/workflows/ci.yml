@@ -1,0 +1,114 @@
+# Source CI of the application (time-for-everything): lint, tests, type checks, PostgreSQL migration tests,
+# frontend production build and secret scans. No image build or deployment here: container image, compose
+# and releases live in the separate time-for-everything_deploy repository, whose release workflow requires a
+# successful run of THIS workflow (file name ci.yml, push event) for the exact commit it publishes.
+# The PostgreSQL service container below is only a disposable test dependency.
+name: Source CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-dev.txt
+      - run: python -m pytest
+        working-directory: backend
+      - run: python -m pytest tests/backend -q
+      - run: ruff check --config pyproject.toml app tests ../scripts
+        working-directory: backend
+      - run: python -I -m unittest discover -s tests/reference -v
+      - run: python -I -m unittest discover -s tests/security -v
+      - run: python -I tests/security/scan_secrets.py
+  postgres:
+    runs-on: ubuntu-latest
+    env:
+      # Throwaway service container on the runner's loopback only. DSNs for extra databases are built
+      # from this variable at run time so no further literal credentials live in this file.
+      CI_PG_PASSWORD: local-ci-only
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: tfe_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-dev.txt
+      - name: Backend tests on PostgreSQL 17 (database tfe_test)
+        run: python -m pytest
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:local-ci-only@127.0.0.1:5432/tfe_test
+          TFE_ALLOW_DESTRUCTIVE_TEST_DB: '1'
+      - name: Create disposable databases tfe_qa and tfe_migr (+ Supabase auth stub)
+        run: |
+          python -I - <<'PY'
+          import os, pathlib, psycopg
+          kw = dict(host="127.0.0.1", port=5432, user="postgres", password=os.environ["CI_PG_PASSWORD"], autocommit=True)
+          with psycopg.connect(dbname="postgres", **kw) as c:
+              c.execute("create database tfe_qa")
+              c.execute("create database tfe_migr")
+          with psycopg.connect(dbname="tfe_migr", **kw) as c:
+              c.execute(pathlib.Path("backend/tests/sql/supabase_stub.sql").read_text())
+          PY
+      - name: Independent QA suite on PostgreSQL 17 (database tfe_qa)
+        run: |
+          export QA_TEST_DATABASE_URL="postgresql://postgres:${CI_PG_PASSWORD}@127.0.0.1:5432/tfe_qa"
+          python -m pytest tests/backend -q
+        env:
+          QA_ALLOW_DESTRUCTIVE_TEST_DB: '1'
+      - name: Migration CLI dry run, apply, idempotent re-apply (database tfe_migr)
+        run: |
+          url="postgresql://postgres:${CI_PG_PASSWORD}@127.0.0.1:5432/tfe_migr"
+          python -I scripts/db_migrate.py --offline
+          python -I scripts/db_migrate.py --database-url "$url"
+          python -I scripts/db_migrate.py --database-url "$url" --apply
+          python -I scripts/db_migrate.py --database-url "$url" --apply | tee /tmp/reapply.txt
+          grep -q 'Schema is up to date.' /tmp/reapply.txt
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:qa
+      - run: npm run build
+      - name: Production bundle has no source maps and no secrets
+        run: |
+          test -f dist/index.html
+          test -z "$(find dist -name '*.map')"
+          if grep -rq 'sourceMappingURL' dist; then echo 'sourceMappingURL found in dist'; exit 1; fi
+          # Absolute path: the scanner resolves relative arguments against the repository root.
+          python3 -I ../tests/security/scan_secrets.py "$PWD/dist"

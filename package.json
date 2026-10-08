@@ -1,0 +1,20 @@
+{
+  "name": "vse-uspeyu-prototype",
+  "version": "0.3.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild prototype/app.js --bundle --minify --sourcemap --outfile=prototype/assets/app.js --loader:.woff2=file --loader:.woff=file",
+    "serve": "python3 -m http.server 8080 --bind 127.0.0.1",
+    "test": "node prototype/smoke-test.cjs",
+    "format": "prettier --write \"prototype/*.{js,cjs,css,html}\" package.json"
+  },
+  "dependencies": {
+    "@fontsource-variable/nunito-sans": "5.3.0",
+    "@unovis/ts": "1.7.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "prettier": "3.9.9"
+  }
+}

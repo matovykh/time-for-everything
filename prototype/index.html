@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Всё успею — мой день</title>
+    <link rel="stylesheet" href="assets/app.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="worlds.css" />
+    <link rel="stylesheet" href="catalog.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <a class="brand" href="#home"
+          ><img src="../logos/full-logo.png" alt="Всё успею" /></a
+        ><span class="eyebrow">МАЛЕНЬКИЕ ШАГИ · БОЛЬШИЕ ОТКРЫТИЯ</span>
+        <nav id="nav" aria-label="Главное меню"></nav>
+        <button class="tour-sidebar" data-tour="open">
+          ✦ Знакомство с миром
+        </button>
+        <div class="sidebar-bottom">
+          <img src="../logos/logo.png" alt="" width="42" />
+          <div>
+            <b>В своём темпе</b><small>Ты соревнуешься только с собой</small>
+          </div>
+        </div>
+      </aside>
+      <div class="workspace">
+        <header>
+          <div class="breadcrumb">
+            Мой остров <span>/</span> <b id="crumb">Мой день</b>
+          </div>
+          <div class="header-right">
+            <span class="demo">Демо-макет</span>
+            <div
+              id="theme-switch"
+              class="theme-switch"
+              role="group"
+              aria-label="Тема оформления"
+            >
+              <button
+                data-theme-choice="light"
+                aria-label="Светлая тема"
+                title="Светлая тема"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <path
+                    d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"
+                  />
+                </svg></button
+              ><button
+                data-theme-choice="dark"
+                aria-label="Тёмная тема"
+                title="Тёмная тема"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M20 14A9 9 0 0 1 10 3a9 9 0 1 0 10 11Z" />
+                </svg></button
+              ><button
+                data-theme-choice="system"
+                aria-label="Системная тема"
+                title="Системная тема"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <path d="M8 21h8m-4-4v4" />
+                </svg>
+              </button>
+            </div>
+            <span class="wallet">✦ <b id="balance">145</b></span
+            ><button
+              class="avatar profile-trigger"
+              data-page="profile"
+              aria-label="Открыть профиль пользователя"
+            >
+              <img src="../logos/user.png" alt="" /><span id="header-name"
+                >Алексей</span
+              >
+            </button>
+          </div>
+        </header>
+        <main id="main"></main>
+        <footer>
+          Всё успею · Здесь важен прогресс, а не рекорды
+          <span>Данные макета хранятся только в этом браузере</span>
+        </footer>
+      </div>
+    </div>
+    <div id="toast" role="status"></div>
+    <section id="signed-out" class="signed-out" hidden>
+      <img src="../logos/full-logo.png" alt="Всё успею" />
+      <h1>До нового открытия!</h1>
+      <p>Твой мир подождёт. Здесь ничего не пропадает.</p>
+      <div class="notice">
+        Выход из демо-профиля. Настоящая авторизация ещё не подключена.<br />Локальные
+        данные остаются на этом устройстве.
+      </div>
+      <button id="demo-sign-in" class="primary">
+        Вернуться в демо-профиль
+      </button>
+    </section>
+    <script src="assets/app.js"></script>
+  </body>
+</html>

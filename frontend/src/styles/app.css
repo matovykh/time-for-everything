@@ -1,0 +1,496 @@
+/* Additions for the React MVP on top of the approved prototype CSS.
+   Uses only the prototype tokens (--bg, --surface, --ink, --muted, --line, --blue, --teal, --yellow, --soft). */
+
+.scene-host,
+.upgrade-art-host {
+  display: contents;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.table-wrap {
+  position: relative; /* keeps .visually-hidden headers inside the scroll box */
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Links that look like the prototype's buttons. */
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 11px 17px;
+  border-radius: 12px;
+  font-weight: 800;
+  background: var(--soft);
+  color: var(--ink);
+}
+.button-link.primary {
+  background: var(--blue);
+  color: #fff;
+}
+.button-link.gold {
+  background: var(--yellow);
+  color: #14213d;
+}
+.button-link:hover {
+  filter: brightness(0.96);
+}
+a:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 3px;
+}
+a.text-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 800;
+}
+a.lesson {
+  border-radius: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  min-height: 44px;
+}
+a.lesson.has-timer {
+  border-color: var(--blue);
+}
+.walk-strip .button-link {
+  background: #fff;
+  color: #12494c;
+}
+a.wallet {
+  font-weight: 700;
+}
+a.avatar {
+  color: var(--ink);
+  font-weight: 800;
+  min-height: 44px;
+}
+.text-button.danger {
+  color: #b42318;
+}
+body[data-theme="dark"] .text-button.danger {
+  color: #ff9b8f;
+}
+
+/* Loading / error / setup states */
+.state-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--muted);
+}
+.state-box.error {
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: 14px;
+}
+.state-box.boot {
+  margin: 20vh auto 0;
+  font-weight: 800;
+}
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--line);
+  border-top-color: var(--blue);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: app-spin 0.9s linear infinite;
+  }
+}
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.form-error {
+  background: #fde8e6;
+  color: #7a1c12;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+body[data-theme="dark"] .form-error {
+  background: #4a2222;
+  color: #ffd6d0;
+}
+.notice.warn {
+  background: #fff3bf;
+  color: #5a4300;
+}
+body[data-theme="dark"] .notice.warn {
+  background: #4a3d10;
+  color: #ffe9a3;
+}
+
+/* Auth screens */
+.auth-page {
+  min-height: 100vh;
+  padding: 20px;
+}
+.auth-theme {
+  display: flex;
+  justify-content: flex-end;
+}
+.auth-card {
+  margin-top: 4vh;
+}
+.auth-form {
+  text-align: left;
+  margin: 20px 0;
+}
+.auth-hint {
+  font-size: 13px;
+}
+.setup-notice {
+  text-align: left;
+}
+.setup-notice ol,
+.setup-checks {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+.setup-notice code {
+  overflow-wrap: anywhere;
+}
+
+/* Chart filters */
+.chart-filters {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.segmented {
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--bg);
+}
+.segmented button {
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 40px;
+  padding: 6px 12px;
+}
+.segmented button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--blue);
+  box-shadow: 0 2px 8px #14213d18;
+}
+body[data-theme="dark"] .segmented button[aria-pressed="true"] {
+  color: #b4c2ff;
+}
+
+/* Timer */
+.timer .notice {
+  text-align: left;
+}
+.overlap ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.save-form {
+  text-align: left;
+  margin: 18px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.save-date {
+  font-weight: 800;
+  font-size: 15px;
+}
+.duration-fields,
+.weekday-picker {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+}
+.duration-fields legend,
+.weekday-picker legend {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+.duration-fields label {
+  flex: 1;
+  min-width: 100px;
+}
+.check-row {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600 !important;
+  min-height: 44px;
+}
+.check-row input {
+  width: 21px;
+  min-height: 21px;
+}
+.walk-goal .stats {
+  margin-bottom: 12px;
+}
+.walk-goal progress {
+  width: 100%;
+  accent-color: var(--teal);
+}
+
+/* History */
+.row-actions {
+  display: flex;
+  gap: 4px;
+}
+.note-cell {
+  max-width: 260px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.edit-row td {
+  white-space: normal;
+  background: var(--bg);
+}
+.inline-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.inline-edit label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 110px;
+}
+.inline-edit label.grow {
+  flex: 1;
+  min-width: 180px;
+}
+.inline-actions,
+.dialog-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dialog-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+.load-more {
+  margin-top: 14px;
+}
+
+/* Chores */
+.task.voluntary .pill {
+  background: #fff3bf;
+  color: #695000;
+}
+.task.archived {
+  opacity: 0.65;
+}
+.task .grow small {
+  display: block;
+  font-size: 11px;
+}
+.week-chores {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
+}
+.week-chores .is-today {
+  border-color: var(--blue);
+}
+
+/* Rewards */
+.rules,
+ul.facts,
+.deferred-list {
+  padding-left: 18px;
+  font-size: 13px;
+}
+.achievement .facts,
+.achievement details {
+  font-size: 12px;
+  color: var(--muted);
+}
+.status-text {
+  font-weight: 700;
+  color: var(--muted);
+}
+.period-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 10px;
+}
+.period-card {
+  background: var(--bg);
+  border-radius: 13px;
+  padding: 12px 15px;
+}
+.period-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.period-total {
+  font-weight: 800;
+  color: #8b6800;
+}
+body[data-theme="dark"] .period-total {
+  color: var(--yellow);
+}
+.period-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+td.wrap-cell {
+  white-space: normal;
+  min-width: 160px;
+}
+p.facts {
+  margin: 4px 0;
+}
+.achievement > div {
+  min-width: 0;
+}
+.missing-days ul {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+/* Settings */
+.settings-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.integration-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.integration-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.pill.ok {
+  background: #dcf8f5;
+  color: #08585c;
+}
+.pill.off {
+  background: #fde8e6;
+  color: #7a1c12;
+}
+.edit-activity {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.child-picker {
+  margin-bottom: 24px;
+}
+
+/* Dialogs */
+.confirm-dialog {
+  border: 0;
+  border-radius: 20px;
+  padding: 26px;
+  max-width: min(460px, 92vw);
+  background: var(--surface);
+  color: var(--ink);
+}
+.confirm-dialog::backdrop {
+  background: #0b1224a0;
+}
+
+.world-journal {
+  margin: 22px 0;
+}
+.world-journal ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.world-journal li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.world-journal li:last-child {
+  border: 0;
+}
+.tour-honesty {
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .achievement[class*="reward-"] {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+  }
+  .achievement[class*="reward-"] > span:last-child {
+    grid-column: 2;
+    justify-self: start;
+    margin-left: 0;
+  }
+  .achievement h3 .status-text {
+    display: block;
+    font-size: 13px;
+  }
+  .chart-filters {
+    justify-content: flex-start;
+  }
+  .row-actions {
+    flex-direction: column;
+  }
+}
+
+.locked-note {
+  align-self: center;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.review-hint {
+  flex-basis: 100%;
+}

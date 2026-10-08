@@ -1,0 +1,525 @@
+/*
+ * world-art.css — companion styles for prototype/world-art.js.
+ * Every class is prefixed "wa-" to avoid clashing with worlds.css.
+ * Loops are calm (no flashes): duration/phase come from --wa-t / --wa-o set inline.
+ * Static rendering is guaranteed by: .wa-still / .motion-off wrappers,
+ * .wa-emblem and .wa-upgrade (always static) and prefers-reduced-motion.
+ */
+
+/* Wrapper: sky colours continue into any letterbox area of the SVG. */
+.island-scene.wa-scene[data-world-art] {
+  background: linear-gradient(
+    var(--wa-sky-top, #d9edf8),
+    var(--wa-sky-bottom, #9cc9d6)
+  );
+}
+.wa-scene .wa-art {
+  overflow: hidden;
+}
+.wa-art .wa-tag {
+  font:
+    800 15px/1 "Nunito Sans Variable",
+    "Nunito Sans",
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.01em;
+  paint-order: stroke;
+}
+.wa-emblem,
+.wa-upgrade {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.wa-upgrade text,
+.wa-emblem text {
+  font-family: "Nunito Sans Variable", system-ui, sans-serif;
+  font-weight: 800;
+}
+
+/* Every animated SVG part pivots on its own box (rotating groups embed an
+   invisible pivot circle so the box centre is the real hinge). */
+.wa-art [class*="wa-"],
+.wa-art .citizen {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+.wa-art .wa-flag,
+.wa-art .wa-flutter {
+  transform-origin: 0% 50%;
+}
+.wa-art .wa-flutter {
+  transform-origin: 50% 0%;
+}
+.wa-art .wa-flicker {
+  transform-origin: 50% 100%;
+}
+.wa-art .wa-gait,
+.wa-art .wa-gait-hop {
+  transform-origin: 50% 100%;
+}
+
+/* ── inhabitants ─────────────────────────────────────────── */
+.wa-art .citizen.wa-walk {
+  animation: wa-walk var(--wa-t, 14s) ease-in-out var(--wa-o, 0s) infinite;
+}
+.wa-art .citizen.wa-idle {
+  animation: wa-idle var(--wa-t, 4s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .citizen.wa-dance {
+  animation: wa-dance var(--wa-t, 0.8s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .citizen.wa-walk .wa-gait {
+  animation: wa-step 0.42s ease-in-out infinite alternate;
+}
+.wa-art .citizen .wa-gait-hop {
+  animation: wa-hop 0.5s cubic-bezier(0.3, 0, 0.5, 1) infinite alternate;
+}
+.wa-art .citizen.wa-idle .wa-gait-hop {
+  animation-duration: 1.4s;
+}
+.wa-art .wa-blink {
+  animation: wa-blink var(--wa-t, 4s) linear var(--wa-o, 0s) infinite;
+}
+
+/* ── environment ─────────────────────────────────────────── */
+.wa-art .wa-sway {
+  animation: wa-sway var(--wa-t, 5s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-spin {
+  animation: wa-spin var(--wa-t, 12s) linear var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-smoke {
+  animation: wa-smoke var(--wa-t, 4s) ease-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-flag {
+  animation: wa-flag var(--wa-t, 1.6s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-flutter {
+  animation: wa-flutter var(--wa-t, 1.4s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-wave {
+  animation: wa-wave var(--wa-t, 5s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-drift {
+  animation: wa-drift var(--wa-t, 30s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-glide {
+  animation: wa-glide var(--wa-t, 22s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-flap {
+  animation: wa-flap var(--wa-t, 0.45s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-float {
+  animation: wa-float var(--wa-t, 3.4s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-sail {
+  animation: wa-sail var(--wa-t, 16s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-ripple {
+  animation: wa-ripple var(--wa-t, 3.4s) ease-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-flicker {
+  animation: wa-flicker var(--wa-t, 0.7s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-glow {
+  animation: wa-glow var(--wa-t, 2.2s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-twinkle {
+  animation: wa-twinkle var(--wa-t, 1.8s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-shimmer {
+  animation: wa-shimmer var(--wa-t, 2.8s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-pulse {
+  animation: wa-pulse var(--wa-t, 2.6s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-beam {
+  animation: wa-beam var(--wa-t, 7s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-swing {
+  animation: wa-swing var(--wa-t, 3.6s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-fall {
+  animation: wa-fall var(--wa-t, 1.2s) linear var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-belt {
+  animation: wa-belt var(--wa-t, 1.6s) linear var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-march {
+  animation: wa-march var(--wa-t, 3s) linear var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-bubble {
+  animation: wa-bubble var(--wa-t, 3.2s) ease-in var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-confetti {
+  animation: wa-confetti var(--wa-t, 4s) linear var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-drive {
+  animation: wa-walk var(--wa-t, 7s) ease-in-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-scuttle {
+  animation: wa-scuttle var(--wa-t, 5s) ease-in-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-hop {
+  animation: wa-jump var(--wa-t, 1.6s) ease-in-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-piston {
+  animation: wa-piston var(--wa-t, 1.2s) ease-in-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-chop {
+  animation: wa-chop var(--wa-t, 0.9s) ease-in-out var(--wa-o, 0s) infinite;
+}
+.wa-art .wa-graze {
+  animation: wa-graze var(--wa-t, 3.4s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-wag {
+  animation: wa-wag var(--wa-t, 0.5s) ease-in-out var(--wa-o, 0s) infinite
+    alternate;
+}
+.wa-art .wa-reveal {
+  animation: wa-reveal 0.8s ease-out both;
+}
+
+@keyframes wa-walk {
+  0%,
+  10% {
+    transform: translate(0, 0);
+  }
+  45%,
+  55% {
+    transform: translate(var(--wa-dx, 30px), var(--wa-dy, 0px));
+  }
+  90%,
+  100% {
+    transform: translate(0, 0);
+  }
+}
+@keyframes wa-idle {
+  to {
+    transform: translateY(-1.5px) rotate(-3deg);
+  }
+}
+@keyframes wa-dance {
+  from {
+    transform: translateY(0) rotate(-6deg);
+  }
+  to {
+    transform: translateY(-6px) rotate(6deg);
+  }
+}
+@keyframes wa-step {
+  to {
+    transform: translateY(-1.6px);
+  }
+}
+@keyframes wa-hop {
+  to {
+    transform: translateY(-5px) scale(0.97, 1.04);
+  }
+}
+@keyframes wa-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes wa-sway {
+  from {
+    transform: rotate(-2.4deg);
+  }
+  to {
+    transform: rotate(2.4deg);
+  }
+}
+@keyframes wa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes wa-smoke {
+  0% {
+    transform: translate(0, 10px) scale(0.5);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(6px, -16px) scale(1.5);
+    opacity: 0;
+  }
+}
+@keyframes wa-flag {
+  from {
+    transform: skewY(-5deg) scaleX(1);
+  }
+  to {
+    transform: skewY(6deg) scaleX(0.86);
+  }
+}
+@keyframes wa-flutter {
+  from {
+    transform: rotate(-8deg);
+  }
+  to {
+    transform: rotate(8deg);
+  }
+}
+@keyframes wa-wave {
+  to {
+    transform: translateX(14px);
+  }
+}
+@keyframes wa-drift {
+  to {
+    transform: translateX(42px);
+  }
+}
+@keyframes wa-glide {
+  to {
+    transform: translate(130px, -14px);
+  }
+}
+@keyframes wa-flap {
+  to {
+    transform: scaleY(0.35);
+  }
+}
+@keyframes wa-float {
+  from {
+    transform: translateY(0) rotate(-1.5deg);
+  }
+  to {
+    transform: translateY(3px) rotate(1.5deg);
+  }
+}
+@keyframes wa-sail {
+  to {
+    transform: translateX(var(--wa-dx, 40px));
+  }
+}
+@keyframes wa-ripple {
+  from {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+@keyframes wa-flicker {
+  from {
+    transform: scale(1, 1);
+  }
+  to {
+    transform: scale(0.86, 1.12);
+  }
+}
+@keyframes wa-glow {
+  to {
+    opacity: 0.45;
+  }
+}
+@keyframes wa-twinkle {
+  to {
+    opacity: 0.35;
+  }
+}
+@keyframes wa-shimmer {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes wa-pulse {
+  from {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+@keyframes wa-beam {
+  from {
+    transform: rotate(-12deg);
+    opacity: 0.55;
+  }
+  to {
+    transform: rotate(10deg);
+    opacity: 1;
+  }
+}
+@keyframes wa-swing {
+  from {
+    transform: rotate(-5deg);
+  }
+  to {
+    transform: rotate(5deg);
+  }
+}
+@keyframes wa-fall {
+  to {
+    stroke-dashoffset: -48;
+  }
+}
+@keyframes wa-belt {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+@keyframes wa-march {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+@keyframes wa-bubble {
+  0% {
+    transform: translateY(14px) scale(0.5);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-22px) scale(1.1);
+    opacity: 0;
+  }
+}
+@keyframes wa-confetti {
+  0% {
+    transform: translateY(-14px) rotate(0deg);
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(30px) rotate(220deg);
+    opacity: 0;
+  }
+}
+@keyframes wa-scuttle {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  45%,
+  60% {
+    transform: translateX(var(--wa-dx, 24px));
+  }
+  90%,
+  100% {
+    transform: translateX(0);
+  }
+}
+@keyframes wa-jump {
+  0%,
+  55%,
+  100% {
+    transform: translateY(0) rotate(0);
+    opacity: 0;
+  }
+  62% {
+    opacity: 1;
+  }
+  75% {
+    transform: translateY(-18px) rotate(-25deg);
+    opacity: 1;
+  }
+  90% {
+    transform: translateY(0) rotate(-50deg);
+    opacity: 0;
+  }
+}
+@keyframes wa-piston {
+  0%,
+  100% {
+    transform: translateY(-8px);
+  }
+  40% {
+    transform: translateY(2px);
+  }
+}
+@keyframes wa-chop {
+  0%,
+  100% {
+    transform: rotate(-30deg);
+  }
+  45% {
+    transform: rotate(24deg);
+  }
+}
+@keyframes wa-graze {
+  0%,
+  40% {
+    transform: rotate(0);
+  }
+  100% {
+    transform: rotate(28deg);
+  }
+}
+@keyframes wa-wag {
+  from {
+    transform: rotate(-22deg);
+  }
+  to {
+    transform: rotate(22deg);
+  }
+}
+@keyframes wa-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── stillness guarantees ────────────────────────────────── */
+.wa-still *,
+.motion-off .wa-art *,
+.wa-emblem *,
+.wa-upgrade * {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-scene *,
+  .wa-art *,
+  .wa-emblem *,
+  .wa-upgrade * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

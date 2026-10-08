@@ -1,0 +1,55 @@
+# Secrets and local configuration. Templates named *.env.example stay tracked.
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+secrets/
+.secrets/
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ecdsa*
+id_ed25519*
+# Backups and dumps (may contain secrets or children's data)
+*.bak
+*.backup
+*.orig
+*~
+*.dump
+
+# Python / JS
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+dist/
+coverage/
+.pytest_cache/
+
+# Local artifacts
+.DS_Store
+*.log
+playwright-report/
+test-results/
+
+# Application runtime and test databases
+*.db
+*.sqlite
+*.sqlite3
+.data/
+.ruff_cache/
+*.egg-info/
+*.tsbuildinfo
+.claude/settings.local.json
+
+# Separate DevOps repository (time-for-everything_deploy), TEMPORARILY nested in this workspace only.
+# It has its own .gitignore/.dockerignore/CI and is never part of the application repository; in
+# production the two repositories are separate checkouts (usually side by side).
+/time-for-everything_deploy/
