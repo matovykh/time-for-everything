@@ -33,7 +33,7 @@ function Root() {
   const { status, retry, signOut } = useSession();
   switch (status.kind) {
     case "checking":
-      return <Checking />;
+      return <Checking onRetry={retry} />;
     case "setup":
       return <SetupScreen error={status.error} ready={status.ready} onRetry={retry} />;
     case "anonymous":

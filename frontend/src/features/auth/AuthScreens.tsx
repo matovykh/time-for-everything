@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useSession } from "../../app/session";
 import { ApiError } from "../../shared/api/client";
 import type { HealthReady } from "../../shared/api/types";
@@ -46,6 +46,9 @@ export function LoginScreen({ expired = false }: { expired?: boolean }) {
         );
       else if (err instanceof ApiError && err.status === 422)
         setError(err.fieldErrors[0]?.message ?? "Проверь почту и пароль.");
+      else if (err instanceof ApiError && err.code === "timeout")
+        // Not retried automatically: the attempt may have reached the server.
+        setError("Сервер не ответил вовремя. Попробуй войти ещё раз чуть позже.");
       else setError(errorText(err));
     } finally {
       setBusy(false);
@@ -140,6 +143,8 @@ const SETUP_HINTS: Record<string, string> = {
   schema_missing:
     "База данных доступна, но схема не создана или устарела. Примени миграции backend — сервер не создаёт схему автоматически.",
   auth_unavailable: "Сервер не может связаться с Supabase Auth. Проверь адрес проекта и сеть сервера.",
+  timeout:
+    "Сервер не ответил вовремя. Он может ещё запускаться или долго ждать базу данных или Supabase. Подожди немного и нажми «Проверить снова»; если повторяется — взрослому стоит проверить журнал сервера.",
 };
 
 export function SetupScreen({
@@ -152,11 +157,15 @@ export function SetupScreen({
   onRetry: () => void;
 }) {
   const missing = Array.isArray(error.details?.missing) ? (error.details?.missing as string[]) : [];
+  // status 0 = the server did not answer (offline or timed out), not a configuration verdict.
+  const unreachable = error.status === 0;
   return (
     <AuthFrame>
-      <h1>Приложение ещё настраивается</h1>
+      <h1>{unreachable ? "Сервер не отвечает" : "Приложение ещё настраивается"}</h1>
       <p className="muted">
-        Это не ошибка ребёнка. Взрослому нужно завершить настройку сервера, и тогда здесь появится вход.
+        {unreachable
+          ? "Это не ошибка ребёнка. Не удалось дождаться ответа сервера — попробуй ещё раз через несколько секунд."
+          : "Это не ошибка ребёнка. Взрослому нужно завершить настройку сервера, и тогда здесь появится вход."}
       </p>
       <div className="notice setup-notice" role="alert">
         <b>{SETUP_HINTS[error.code] ?? errorText(error)}</b>
@@ -193,12 +202,42 @@ export function SetupScreen({
   );
 }
 
-export function Checking() {
+/** After this long on the startup screen, explain the wait and offer a restart. */
+export const SLOW_START_HINT_MS = 5_000;
+
+export function Checking({ onRetry }: { onRetry?: () => void }) {
+  const [slow, setSlow] = useState(false);
+  const [round, setRound] = useState(0); // this screen stays mounted across retries
+  useEffect(() => {
+    setSlow(false);
+    const t = setTimeout(() => setSlow(true), SLOW_START_HINT_MS);
+    return () => clearTimeout(t);
+  }, [round]);
   return (
     <div className="auth-page">
-      <div className="state-box loading boot" role="status">
+      <div className="state-box loading boot" role="status" aria-live="polite">
         <img src="/logos/logo.png" alt="" width={64} />
         <span>Открываем твой остров…</span>
+        {slow && (
+          <>
+            <small>
+              Сервер отвечает дольше обычного. Если ответа так и не будет, через несколько секунд покажем, что
+              случилось.
+            </small>
+            {onRetry && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  setRound((r) => r + 1);
+                  onRetry();
+                }}
+              >
+                Попробовать снова
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import APP_VERSION, get_settings
 from app.core.deps import Ctx, get_ctx
-from app.db.session import REQUIRED_SCHEMA_VERSION, get_engine, ping, schema_status
+from app.db.session import REQUIRED_SCHEMA_VERSION, check_database, get_engine
 from app.modules.rewards.policy import POLICY_VERSION
 
 router = APIRouter(tags=["administration"])
@@ -27,6 +26,7 @@ def ready() -> JSONResponse:
     settings = get_settings()
     checks: dict[str, str] = {}
     setup: list[str] = []
+    diagnostics: dict[str, dict] = {}
     engine = None
     try:
         engine = get_engine()
@@ -37,23 +37,28 @@ def ready() -> JSONResponse:
         checks["database"] = "not_configured"
         setup.append("Задайте DATABASE_URL (строка подключения Supabase PostgreSQL, sslmode=require).")
     if engine is not None:
-        try:
-            ping(engine)
-            checks["database"] = "ok"
-            checks["schema"] = schema_status(engine)
-            if checks["schema"] != "ok":
-                setup.append(f"Примените миграции: python scripts/db_migrate.py --apply "
-                             f"(нужна версия {REQUIRED_SCHEMA_VERSION}).")
-        except SQLAlchemyError:
-            checks["database"] = "unreachable"
+        result = check_database(engine, settings.db_ready_timeout_seconds)
+        checks["database"], checks["schema"] = result.database, result.schema
+        if result.diagnostics:
+            diagnostics["database"] = result.diagnostics  # class names / SQLSTATE / category only
+        if result.database == "ok" and result.schema != "ok":
+            setup.append(f"Примените миграции: python scripts/db_migrate.py --apply "
+                         f"(нужна версия {REQUIRED_SCHEMA_VERSION}).")
+        elif result.database == "timeout":
+            setup.append("База данных не ответила вовремя: проверьте сеть/TLS до Supabase и нагрузку пула.")
+        elif result.database == "unreachable":
             setup.append("База данных недоступна: проверьте сеть, TLS и учётные данные в DATABASE_URL.")
+        elif result.database == "error":
+            setup.append("Ошибка при проверке БД (см. diagnostics и журнал сервера): проверьте права и схему.")
     checks.setdefault("schema", "unknown")
     checks["auth"] = "configured" if settings.auth_configured else "not_configured"
     if not settings.auth_configured:
         setup.append("Задайте SUPABASE_URL и SUPABASE_PUBLISHABLE_KEY (publishable/anon ключ, не secret).")
     ok = checks["database"] == "ok" and checks["schema"] == "ok" and checks["auth"] == "configured"
-    return JSONResponse({"status": "ready" if ok else "not_ready", "checks": checks, "setup": setup},
-                        status_code=200 if ok else 503)
+    body: dict = {"status": "ready" if ok else "not_ready", "checks": checks, "setup": setup}
+    if diagnostics:
+        body["diagnostics"] = diagnostics
+    return JSONResponse(body, status_code=200 if ok else 503)
 
 
 @router.get("/settings")

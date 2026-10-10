@@ -278,11 +278,24 @@ Always `200 {"status":"ok"}` while the process runs (works with no configuration
 { "status": "ready", "checks": { "database": "ok", "schema": "ok", "auth": "configured" }, "setup": [] }
 ```
 Otherwise `503` with the same shape, `status: "not_ready"`, checks such as
-`"database": "not_configured" | "unreachable"`, `"schema": "missing" | "outdated" | "unknown"`,
+`"database": "not_configured" | "invalid_configuration" | "unreachable" | "timeout" | "error"`, `"schema": "missing" | "outdated" | "unknown"`,
 `"auth": "not_configured"`, and `setup`: list of human-readable steps (no secret values).
 
-When the DB/auth is not configured, every data endpoint returns `503 service_not_configured`
-(`details.missing: ["DATABASE_URL", …]`). The server never creates the schema automatically.
+Missing DB/auth configuration returns `503 service_not_configured`
+(`details.missing: ["DATABASE_URL", …]`). A missing or invalid session cookie is rejected with `401`
+before database access; a valid session still requires DB-backed revocation checks.
+The server never creates the schema automatically.
+
+Database connection failures return `503 database_unavailable` with `details.reason` (a safe error
+category). Other SQL failures return `500 internal_error`. `schema_missing` is not used for transport
+failures: the migrations table must actually be absent, empty, or lack the required version.
+
+Readiness waits at most `DB_READY_TIMEOUT_SECONDS` (default 10) for its database probe, excluding
+request scheduling. On failure an optional `diagnostics.database` contains only `category`, `error`,
+`driver_error`, and `sqlstate` — no driver messages, credentials, SQL text or parameters. Probes use a
+transaction-local PostgreSQL statement timeout and bounded background workers; an HTTP timeout does
+not forcibly terminate a blocked socket. If all probe workers remain stuck, a process restart may be
+needed. Normal data queries do not have a total server-side deadline.
 
 ---
 

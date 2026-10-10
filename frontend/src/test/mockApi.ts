@@ -5,6 +5,8 @@ export interface Call {
   path: string;
   headers: Record<string, string>;
   body: unknown;
+  /** The signal fetch received (lets tests assert cancellation). */
+  signal?: AbortSignal | null;
 }
 
 type Handler = (call: Call) => { status?: number; body?: unknown; headers?: Record<string, string> } | Promise<never>;
@@ -18,7 +20,13 @@ export function mockApi(routes: Record<string, Handler | Handler[]>) {
     const method = (init.method ?? "GET").toUpperCase();
     const path = url.pathname.replace(/^\/api\/v1/, "");
     const headers = Object.fromEntries(Object.entries((init.headers ?? {}) as Record<string, string>));
-    const call: Call = { method, path: path + url.search, headers, body: init.body ? JSON.parse(String(init.body)) : undefined };
+    const call: Call = {
+      method,
+      path: path + url.search,
+      headers,
+      body: init.body ? JSON.parse(String(init.body)) : undefined,
+      signal: init.signal,
+    };
     calls.push(call);
     const key = `${method} ${path}`;
     const entry = routes[key];
@@ -26,7 +34,14 @@ export function mockApi(routes: Record<string, Handler | Handler[]>) {
     const list = Array.isArray(entry) ? entry : [entry];
     const i = Math.min(counters[key] ?? 0, list.length - 1);
     counters[key] = (counters[key] ?? 0) + 1;
-    const res = await list[i](call);
+    // Like real fetch: an aborted signal rejects with AbortError even if the handler hangs.
+    const res = await new Promise<Awaited<ReturnType<Handler>>>((resolve, reject) => {
+      const signal = init.signal;
+      const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      Promise.resolve(list[i](call)).then(resolve, reject);
+    });
     return json(res.status ?? 200, res.body, res.headers);
   });
   vi.stubGlobal("fetch", fetchMock);

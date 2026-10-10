@@ -1,4 +1,13 @@
-import { api, command, request, setCsrfToken, ensureCsrf } from "./client";
+import {
+  api,
+  AUTH_TIMEOUT_MS,
+  command,
+  LOGIN_TIMEOUT_MS,
+  probe,
+  READY_TIMEOUT_MS,
+  request,
+  setCsrfToken,
+} from "./client";
 import type {
   Activity,
   Analytics,
@@ -30,21 +39,30 @@ import type {
 const enc = encodeURIComponent;
 
 // ── Health / auth / profile ───────────────────────────────────────────
-export const getReady = async (): Promise<HealthReady | null> => {
+/**
+ * Diagnostic readiness probe, bounded by READY_TIMEOUT_MS. Never throws: a timeout, network
+ * failure, abort or unexpected body all yield null ("readiness unknown").
+ */
+export const getReady = async (signal?: AbortSignal): Promise<HealthReady | null> => {
   // 503 still carries the HealthReady shape; read it without the error path.
   try {
-    const res = await fetch("/api/v1/health/ready", { credentials: "same-origin" });
-    const body = (await res.json()) as HealthReady;
-    return body && (body.status === "ready" || body.status === "not_ready") ? body : null;
+    const { body } = await probe("/health/ready", { signal, timeoutMs: READY_TIMEOUT_MS });
+    const ready = body as HealthReady | null;
+    return ready && (ready.status === "ready" || ready.status === "not_ready") ? ready : null;
   } catch {
     return null;
   }
 };
 
+/**
+ * Never retried after a timeout or network failure (the attempt may or may not have reached
+ * Supabase); only a CSRF rejection — refused before the handler runs — is retried once by the client.
+ */
 export async function login(email: string, password: string): Promise<Me> {
-  await ensureCsrf();
+  // request() bootstraps the CSRF cookie for unsafe methods.
   const res = await request<{ me: Me; csrf_token: string }>("POST", "/auth/login", {
     body: { email, password },
+    timeoutMs: LOGIN_TIMEOUT_MS,
   });
   setCsrfToken(res.csrf_token);
   return res.me;
@@ -53,7 +71,8 @@ export async function login(email: string, password: string): Promise<Me> {
 export const logout = () =>
   request<void>("POST", "/auth/logout", { body: { pause_running_timers: true } });
 
-export const getMe = () => api.get<Me>("/me");
+export const getMe = (opts: { signal?: AbortSignal; timeoutMs?: number } = {}) =>
+  request<Me>("GET", "/me", { signal: opts.signal, timeoutMs: opts.timeoutMs ?? AUTH_TIMEOUT_MS });
 
 export const patchMe = (body: Partial<{
   display_name: string;

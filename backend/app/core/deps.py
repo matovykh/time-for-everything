@@ -62,12 +62,22 @@ def verify_access_token(token: str, *, allow_expired: bool = False) -> Principal
         raise ApiError(503, "auth_unavailable", "Сервис входа временно недоступен.") from exc
 
 
-def get_principal(request: Request, db: Session = Depends(get_db)) -> Principal:
-    """Verified JWT from the HttpOnly cookie that has not been revoked by a logout."""
+def get_token_principal(request: Request) -> Principal:
+    """Cookie + JWT signature/expiry check only; needs no database.
+
+    Resolved before `get_db` (FastAPI solves sub-dependencies in declaration order), so a request
+    without a valid session gets 401 even while the database is down or not configured."""
     token = request.cookies.get(ACCESS_COOKIE)
     if not token:
         raise ApiError(401, "not_authenticated", _SESSION_MESSAGES["not_authenticated"])
-    principal = verify_access_token(token)
+    return verify_access_token(token)
+
+
+def get_principal(principal: Principal = Depends(get_token_principal), db: Session = Depends(get_db)) -> Principal:
+    """Verified JWT from the HttpOnly cookie that has not been revoked by a logout.
+
+    Fail closed: a genuine token is only accepted once the revocation table could be checked, so a
+    valid cookie with the database unavailable yields 503, never access."""
     if revocation.is_revoked(db, principal):
         raise ApiError(401, "not_authenticated", _SESSION_MESSAGES["not_authenticated"])
     return principal

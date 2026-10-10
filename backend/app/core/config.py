@@ -38,6 +38,25 @@ class Settings(BaseSettings):
 
     database_url: SecretStr | None = None
     db_pool_size: int = Field(default=5, ge=1, le=50)
+    # None = same as db_pool_size (historical behaviour).
+    db_max_overflow: int | None = Field(default=None, ge=0, le=50)
+    db_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    db_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
+    db_pool_pre_ping: bool = True
+    # Diagnostic only: open a fresh connection per checkout (no pooling). Pool settings are then ignored.
+    db_null_pool: bool = False
+    # libpq connect_timeout: bounds connection establishment per host attempt, NOT query duration.
+    db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    # TCP keepalives detect a silently dead peer while the client waits for a reply.
+    db_tcp_keepalives: bool = True
+    db_tcp_keepalives_idle_seconds: int = Field(default=30, ge=1, le=7200)
+    db_tcp_keepalives_interval_seconds: int = Field(default=10, ge=1, le=600)
+    db_tcp_keepalives_count: int = Field(default=3, ge=1, le=30)
+    # libpq tcp_user_timeout (Linux only; ignored elsewhere): max time sent data may stay unacknowledged.
+    # 0 = operating-system default.
+    db_tcp_user_timeout_ms: int = Field(default=30000, ge=0, le=600000)
+    # Upper bound on how long GET /health/ready waits for its database check.
+    db_ready_timeout_seconds: float = Field(default=10.0, ge=0.1, le=120)
 
     supabase_url: str | None = None
     # Publishable (sb_publishable_…) or legacy anon key: sent as `apikey` to Supabase Auth REST.
@@ -61,6 +80,11 @@ class Settings(BaseSettings):
         if v is None or not v.strip():
             return None
         return v.strip().rstrip("/")
+
+    @field_validator("db_max_overflow", mode="before")
+    @classmethod
+    def _empty_int_is_none(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
 
     @field_validator("database_url", "supabase_publishable_key", "supabase_jwt_secret", "openai_api_key")
     @classmethod

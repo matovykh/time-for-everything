@@ -11,6 +11,7 @@ import {
   ApiError,
   ensureCsrf,
   getActingChild,
+  isAbortError,
   onUnauthorized,
   refreshSession,
   resetClientState,
@@ -71,8 +72,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Startup check. Every step is bounded (client.ts): /auth/csrf, /me and /auth/refresh by
+  // AUTH_TIMEOUT_MS each, /health/ready by READY_TIMEOUT_MS. A new attempt (retry, child
+  // switch, unmount) aborts the previous one, so no stale request can overwrite the status.
   useEffect(() => {
-    let cancelled = false;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     (async () => {
       setStatus({ kind: "checking" });
       try {
@@ -83,22 +88,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         /* ignore */
       }
       try {
-        await ensureCsrf();
+        await ensureCsrf(false, signal);
         let me: Me;
         try {
-          me = await ep.getMe();
+          me = await ep.getMe({ signal });
         } catch (e) {
-          if (e instanceof ApiError && e.status === 401 && (await refreshSession())) me = await ep.getMe();
+          if (e instanceof ApiError && e.status === 401 && (await refreshSession(signal)))
+            me = await ep.getMe({ signal });
           else throw e;
         }
-        if (!cancelled) await afterLogin(me);
+        if (!signal.aborted) await afterLogin(me);
       } catch (e) {
-        if (cancelled) return;
+        if (signal.aborted || isAbortError(e)) return;
         if (e instanceof ApiError && e.status === 401) {
           // An unconfigured backend still answers /me with 401; check readiness so the
           // child does not face a login form that can never succeed.
-          const ready = await ep.getReady();
-          if (cancelled) return;
+          const ready = await ep.getReady(signal);
+          if (signal.aborted) return;
           if (ready && ready.status !== "ready")
             setStatus({
               kind: "setup",
@@ -116,13 +122,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             e instanceof ApiError
               ? e
               : new ApiError({ status: 0, code: "network_error", message: String(e) });
-          setStatus({ kind: "setup", error: err, ready: await ep.getReady() });
+          const ready = await ep.getReady(signal);
+          if (signal.aborted) return;
+          setStatus({ kind: "setup", error: err, ready });
         }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [attempt, afterLogin]);
 
   useEffect(() => {

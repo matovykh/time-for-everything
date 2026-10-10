@@ -10,12 +10,22 @@ export function Loading({ label = "Загружаем…" }: { label?: string })
   );
 }
 
+export const CSRF_FAILED_TEXT =
+  "Сервер отклонил запрос защитой от подделки (CSRF): токен безопасности устарел или не совпал. Обнови страницу и попробуй ещё раз. Если ошибка повторяется, адрес в браузере может не совпадать с адресом, настроенным на сервере.";
+export const CSRF_COOKIE_MISSING_TEXT =
+  "Браузер не сохранил защитный cookie, поэтому сервер отклоняет вход и изменения (CSRF). Обычно так бывает, когда приложение открыто по http://, а сервер выдаёт cookie только для https://, или когда cookie запрещены. Открой приложение по https-адресу установки или попроси взрослого проверить настройку.";
+
 /** Human readable error text; never shows raw stack traces. */
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.code === "timeout")
+      return "Сервер не ответил вовремя. Проверь связь и попробуй ещё раз.";
     if (error.status === 0)
       return "Нет связи с сервером. Проверь интернет или запусти backend.";
     if (error.status === 401) return "Сессия завершилась. Войди снова.";
+    // CSRF rejections are not a permissions problem; say what actually happened.
+    if (error.code === "csrf_cookie_missing") return CSRF_COOKIE_MISSING_TEXT;
+    if (error.code === "csrf_failed") return CSRF_FAILED_TEXT;
     if (error.status === 403) return "Недостаточно прав для этого действия.";
     if (error.status === 404) return "Не нашли такие данные.";
     if (error.status === 409)

@@ -8,7 +8,10 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.db.errors import is_unavailable_error, log_db_error
 
 log = logging.getLogger("app.errors")
 
@@ -105,6 +108,21 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _http(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code, message = _HTTP_CODES.get(exc.status_code, ("error", "Ошибка запроса."))
         return JSONResponse(error_body(request_id_of(request), code, message), status_code=exc.status_code)
+
+    @app.exception_handler(SQLAlchemyError)
+    async def _database(request: Request, exc: SQLAlchemyError) -> JSONResponse:
+        route = getattr(request.scope.get("route"), "path", "?")
+        if is_unavailable_error(exc):
+            # Connectivity/timeout/pool exhaustion: transient, retryable. Value-free log line only.
+            info = log_db_error(f"database unavailable method={request.method} route={route}", exc,
+                                request_id=request_id_of(request))
+            return JSONResponse(
+                error_body(request_id_of(request), "database_unavailable",
+                           "База данных временно недоступна. Попробуйте позже.",
+                           details={"reason": info["category"]}),
+                status_code=503, headers={"Retry-After": "5"},
+            )
+        return await _unhandled(request, exc)
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
