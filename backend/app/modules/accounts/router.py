@@ -15,6 +15,7 @@ from app.core.clock import clock, is_valid_timezone, iso, local_date
 from app.core.config import get_settings
 from app.core.deps import Ctx, auth_not_configured, get_auth_client, get_ctx, verify_access_token
 from app.core.errors import ApiError, validation
+from app.core.login_stages import LoginStage, time_db_dependency
 from app.core.schemas import Strict
 from app.core.security import (
     ACCESS_COOKIE,
@@ -102,11 +103,14 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/auth/login")
+@time_db_dependency  # get_db logs the db_dependency stage for this route
 def login(body: LoginIn, request: Request, auth: SupabaseAuthClient = Depends(get_auth_client),
           db=Depends(get_db)) -> JSONResponse:
+    # Stage timing (start/ok/error + elapsed_ms per request_id): see app.core.login_stages. Value-free by design.
     settings = get_settings()
     if not settings.auth_configured:
         raise auth_not_configured()
+    rid = getattr(request.state, "request_id", None)
     ip = _client_ip(request)
     email = body.email.lower()
     for key, limit in ((f"ip:{ip}", settings.login_rate_limit * 3), (f"acct:{ip}:{email}", settings.login_rate_limit)):
@@ -115,7 +119,8 @@ def login(body: LoginIn, request: Request, auth: SupabaseAuthClient = Depends(ge
             raise ApiError(429, "rate_limited", "Слишком много попыток. Подождите немного.",
                            headers={"Retry-After": str(wait)})
     try:
-        tokens = auth.sign_in_with_password(email, body.password)
+        with LoginStage(rid, "supabase_sign_in"):
+            tokens = auth.sign_in_with_password(email, body.password)
     except InvalidCredentials as exc:
         raise ApiError(401, "invalid_credentials", "Неверный email или пароль.") from exc
     except UpstreamRateLimited as exc:
@@ -123,22 +128,26 @@ def login(body: LoginIn, request: Request, auth: SupabaseAuthClient = Depends(ge
                        headers={"Retry-After": "60"}) from exc
     except AuthUnavailable as exc:
         raise ApiError(503, "auth_unavailable", "Сервис входа временно недоступен.") from exc
-    principal = verify_access_token(tokens.access_token)
-    profile = ensure_profile(db, principal)
+    with LoginStage(rid, "jwt_verify"):
+        principal = verify_access_token(tokens.access_token)
+    with LoginStage(rid, "ensure_profile"):
+        profile = ensure_profile(db, principal)
     ctx = Ctx(db=db, actor=profile, child=profile, is_guardian=False)
-    try:  # light due-period check at login (spec §8); failures never block login
-        from app.modules.rewards.service import evaluate_due
+    with LoginStage(rid, "reward_evaluation") as stage:
+        try:  # light due-period check at login (spec §8); failures never block login
+            from app.modules.rewards.service import evaluate_due
 
-        evaluate_due(db, profile, ctx.today, profile.id)
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
-        # No traceback/message: DB errors may carry SQL parameters (personal data).
-        log.error("reward evaluation at login failed request_id=%s error=%s",
-                  getattr(request.state, "request_id", None), type(exc).__name__)
-    token = new_csrf_token()
-    resp = JSONResponse({"me": me_dict(ctx), "csrf_token": token})
-    set_session_cookies(resp, tokens.access_token, tokens.refresh_token, tokens.expires_in, settings)
-    set_csrf_cookie(resp, token, settings)
+            evaluate_due(db, profile, ctx.today, profile.id)
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            # No traceback/message: DB errors may carry SQL parameters (personal data).
+            log.error("reward evaluation at login failed request_id=%s error=%s", rid, type(exc).__name__)
+            stage.swallowed(exc)
+    with LoginStage(rid, "response"):
+        token = new_csrf_token()
+        resp = JSONResponse({"me": me_dict(ctx), "csrf_token": token})
+        set_session_cookies(resp, tokens.access_token, tokens.refresh_token, tokens.expires_in, settings)
+        set_csrf_cookie(resp, token, settings)
     return resp
 
 
