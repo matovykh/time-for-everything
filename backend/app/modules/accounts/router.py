@@ -131,7 +131,8 @@ def login(body: LoginIn, request: Request, auth: SupabaseAuthClient = Depends(ge
     with LoginStage(rid, "jwt_verify"):
         principal = verify_access_token(tokens.access_token)
     with LoginStage(rid, "ensure_profile"):
-        profile = ensure_profile(db, principal)
+        # Only login passes its request id: logs the value-free ensure_profile.* sub-stages (provisioning docstring).
+        profile = ensure_profile(db, principal, login_request_id=rid)
     ctx = Ctx(db=db, actor=profile, child=profile, is_guardian=False)
     with LoginStage(rid, "reward_evaluation") as stage:
         try:  # light due-period check at login (spec §8); failures never block login

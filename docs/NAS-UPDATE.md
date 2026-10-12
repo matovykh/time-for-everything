@@ -1,485 +1,561 @@
-# Обновление «Всё успею» на домашнем Synology
+# Обновление «Всё успею» на домашнем Synology — восстановительный релиз
 
-**Для уже работающей установки** из [NAS-FIRST-INSTALL.md](NAS-FIRST-INSTALL.md):
-`http://192.168.1.97:18080`, проект Compose `time-for-everything_deploy`, образ переносится файлом.
+**Релиз:** диагностика этапов создания профиля при входе (`ensure_profile.*`), ветка
+`recovery/provisioning-diagnostics`. Установка уже работает: `http://192.168.1.97:18080`, проект Compose
+`time-for-everything_deploy`, образ переносится файлом.
 
-Этот документ описывает **обновление**, а не установку заново. Он сохраняет всё, что уже настроено на NAS:
+Документ описывает **обновление**, а не установку заново. На NAS сохраняется всё, что уже настроено:
 
-- NAS-копию `compose.production.yaml` с портом **18080** через `TFE_HTTP_PORT`, привязкой к
-  `192.168.1.97` и **закомментированным** `# cpus: 1.0`;
-- `deploy.env`, в котором меняется **только строка `TFE_IMAGE`**;
-- секретный `config/app.env` — его не пересоздаём, не перезаписываем и не выводим на экран;
-- базу Supabase: никаких `db_reset.py`. **В этом релизе миграций нет** (подтверждается командой в шаге 3
-  быстрого пути); общий порядок для будущих релизов с миграциями вынесен в [раздел 5](#5-миграции-базы--в-этом-релизе-не-требуются).
+- NAS-копия `compose.production.yaml`: адрес **192.168.1.97**, порт **18080** через `TFE_HTTP_PORT`,
+  строка `# cpus: 1.0` **закомментирована**;
+- в `deploy.env` меняется **только строка `TFE_IMAGE`**;
+- секретный `config/app.env` **не меняется, не копируется и не выводится на экран**. В нём остаётся
+  `DB_NULL_POOL=true` (раздел 6.3);
+- база Supabase не затрагивается: **миграций в этом релизе нет** (раздел 5).
 
-Каждая сборка получает **новый тег**. Старый образ остаётся на NAS для отката.
-
-> **Этот документ ничего не выполняет за вас.** Коммит, push, сборку и перенос выполняете вы сами.
-> Команды ниже не вызывают `git add .`, `git push --force`, `docker system prune` и не копируют поверх
-> ваших файлов на NAS.
+> **Этот документ ничего не выполняет за вас.** Коммит, push, сборку, перенос и переключение на NAS
+> выполняете вы сами, по одному блоку.
 
 ---
 
-## Быстрый путь для этого обновления
+## ⚠ Почему инструкция переписана и главные правила
 
-Короткая последовательность. Подробности, ожидаемый вывод и что делать при ошибках — по ссылкам.
-Первые четыре шага выполняются при работающем старом контейнере, без простоя.
+В прошлой версии этого документа после сканирования стояла строка `rm -rf -- "$EXPORT"`, а следующим
+шагом шла команда `git -C "$APP" add -- \ …`. При вставке строки склеились, и `rm` получил в качестве
+аргументов `git`, `-C`, **путь репозитория `$APP`** и остальные слова. В результате рабочий репозиторий был
+удалён. Нынешняя копия восстановлена по пути
+`/Users/fedor/RepoPrompt/ВсёУспею/time-for-everything`.
 
-| # | Где | Что сделать | Подробно |
+Поэтому для этого документа действуют жёсткие правила:
+
+1. **Ни одной команды удаления.** Здесь нет `rm`, `rm -rf`, `git clean`, `git reset`, `git checkout -- .`,
+   `git stash`, `docker … prune`, `docker image rm`, `tfe down`. Если такая команда «кажется нужной»,
+   остановитесь и спросите.
+2. **Временные каталоги не удаляются.** Выгрузки для сканирования создаются через `mktemp` в `$TMPDIR`
+   (`tfe-scan-index.*`, `tfe-scan-head.*`) и **остаются там**. macOS сама чистит `$TMPDIR`. Блок печатает путь
+   к каталогу, этого достаточно.
+3. **Каждый блок самостоятелен.** Он начинается с `cd` в существующий каталог, сам заново определяет
+   переменные и проверяет их. От переменных, оставшихся от прошлых блоков, ничего не зависит.
+4. **Каждый блок выполняется в скобках `( … )`.** При ошибке блок печатает `СТОП: …` и прекращается через
+   `exit`, но закрывается только подоболочка, окно терминала остаётся. Копируйте блок **целиком**, от `(`
+   до `)`, и вставляйте **по одному**. Дождитесь вывода и прочитайте строку `ОК: …` или `СТОП: …`.
+5. **Нет переносов строк через `\`.** Длинные команды записаны одной строкой: склеивание строк, которое
+   привело к удалению, здесь невозможно.
+6. **Внутри блоков нет комментариев `#` и восклицательных знаков.** zsh по умолчанию не понимает
+   комментарии во вставленных командах, а bash в интерактивном режиме воспринимает `!` в кавычках как
+   ссылку на историю.
+7. **Секреты не выводятся.** Нельзя запускать `cat` для `app.env` или файлов из
+   `~/tfe-rescue-20261012-123852`, нельзя показывать `DATABASE_URL`. Сканер секретов печатает только итоговую
+   строку, а при находках — только файл и номер строки.
+8. **Ничего не отправляется в `main` и ничего не перезаписывается силой.** Коммит и push делаются в ветку
+   `recovery/provisioning-diagnostics`, без `--force`.
+
+**На Mac перед первым блоком** откройте новое окно «Терминал» и запустите чистый bash:
+
+```sh
+/bin/bash --noprofile --norc
+```
+
+Все Mac-блоки ниже рассчитаны на этот bash.
+
+---
+
+## Быстрый путь
+
+| # | Где | Что сделать | Раздел |
 |---|---|---|---|
-| 1 | NAS | Узнать **фактический** работающий образ — это образ для отката. Сохранить копии `deploy.env` и compose; убедиться, что в compose порт 18080 и `# cpus` | [4.1–4.3](#41-записать-что-работает-сейчас) |
-| 2 | Mac | Коммит документации отдельно; коммит функциональности **точным списком файлов**; скан секретов выгрузки индекса/`HEAD`; `push origin main`; зелёный Source CI | [1.2](#12-проверка-на-секреты--именно-того-что-пойдёт-в-git), [1.3–1.5](#13-коммит-документации--отдельно-по-желанию) |
-| 3 | Mac | Проверить: `schema_version=20261006000002` → **миграций нет**. Другое значение — остановиться | [2.1](#21-проверить-версию-схемы) |
-| 4 | Mac | Собрать `linux/amd64` с новым тегом `nas-<дата>-<sha7>`, `docker save`, `shasum`, `scp -O` | [2.2](#22-сборка), [3](#3-сохранить-архив-и-перенести-на-nas) |
-| 5 | NAS | `sha256sum -c` → `docker load` → проверка `linux/amd64` | [4.4](#44-проверить-архив-и-загрузить-образ) |
-| 6 | NAS | `app.env` **не менять**: новые `DB_*` необязательны, действуют значения по умолчанию; HTTP-настройки остаются | [6.4](#64-новые-настройки-appenv--необязательные) |
-| 7 | NAS | Заменить только `TFE_IMAGE` → `tfe config -q` → `tfe up -d --no-build --pull never` | [6.1–6.3](#61-заменить-только-tfe_image) |
-| 8 | NAS + браузер | `healthy`, `ready`, запущен новый образ; вход, одно действие (таймер), новая функция | [7](#7-проверка-после-обновления) |
-| 9 | NAS | При проблеме — вернуть старый `TFE_IMAGE` из шага 1 и `tfe up -d --no-build --pull never` | [8](#8-откат-на-предыдущий-образ) |
-
-Всё, что ниже, — подробное приложение к этим шагам.
+| 1 | Mac | Проверить окружение: каталог, ветку, deploy-репозиторий | [1.1](#11-проверка-окружения-только-чтение) |
+| 2 | Mac | Посмотреть изменения, прогнать тесты | [1.2–1.3](#12-что-изменено) |
+| 3 | Mac | Добавить в индекс **ровно шесть файлов**, затем сканировать выгрузку индекса: `0 finding(s), 0 HIGH`, `exit=0` | [1.4–1.5](#14-добавить-в-индекс-ровно-шесть-файлов) |
+| 4 | Mac | Сделать коммит в `recovery/provisioning-diagnostics`. Блок коммита сам заново сканирует дерево индекса и сверяет `write-tree` с `HEAD^{tree}`. Затем сканировать выгрузку `HEAD`: `exit=0` | [1.6–1.7](#16-коммит) |
+| 5 | Mac | Сделать push **этой ветки** (не `main`) и дождаться зелёного Source CI | [1.8](#18-push-ветки-восстановления) |
+| 6 | Mac | Проверки перед сборкой: схема `20261006000002`, deploy `bcb583c` чист, имена этапов есть в коммите | [2.1](#21-проверки-перед-сборкой-только-чтение) |
+| 7 | Mac | Собрать **закоммиченный** SHA с новым тегом `nas-<дата>-<sha7>`, затем `docker save` и `shasum` | [2.2](#22-сборка-архив-и-контрольная-сумма) |
+| 8 | Mac | Перенести архив через `scp -O` | [3](#3-перенос-на-nas) |
+| 9 | NAS | Записать работающий образ (ожидается `…nas-20261010-210507-620e834`), сделать копии конфигов, проверить compose | [4.1–4.3](#41-снимок-текущего-состояния-только-чтение) |
+| 10 | NAS | Выполнить `sha256sum -c`, затем `docker load` и убедиться, что образ `linux/amd64` | [4.4](#44-проверить-архив-и-загрузить-образ) |
+| 11 | NAS | Заменить только `TFE_IMAGE`, затем `tfe config -q` и `tfe up -d --no-build --pull never`. `app.env` не трогать | [6](#6-переключить-nas-на-новый-образ) |
+| 12 | NAS + браузер | Убедиться в `healthy` и `ready` и что запущен новый образ; одна попытка входа; лог по [LOGIN-DIAGNOSTICS.md](LOGIN-DIAGNOSTICS.md) | [7](#7-проверка-после-обновления) |
+| 13 | NAS | При проблеме вернуть прежний `TFE_IMAGE` | [8](#8-откат) |
 
 ---
 
-## 0. Что уже известно и на чём основаны команды
+## 0. Исходные данные (проверено на Mac 12 октября 2026 года)
 
-Проверено по локальным файлам на Mac 9 октября 2026 года. **Состояние NAS отсюда не видно:** что
-фактически запущено, узнаём на самом NAS через `docker inspect` (раздел 4.1).
-
+Состояние NAS отсюда не видно. Что фактически запущено, проверяется на NAS командой `docker inspect`
+(раздел 4.1).
 
 | Параметр | Значение |
 |---|---|
-| Репозиторий приложения | `/Users/fedor/RepoPrompt/time-for-everything`, ветка `main`, remote `origin` → `github.com/matovykh/time-for-everything` |
-| Deploy-репозиторий | `/Users/fedor/RepoPrompt/time-for-everything/time-for-everything_deploy`, **отдельный** Git-репозиторий, ветка `main`, remote → `github.com/matovykh/time-for-everything_deploy` |
-| Почему deploy не виден в Git приложения | В `.gitignore` приложения есть `/time-for-everything_deploy/`. Коммиты в двух репозиториях делаются отдельно |
-| Что попадает в образ | `git archive` **закоммиченного** SHA приложения: только `frontend/`, `backend/app/`, `backend/requirements.txt` (`scripts/stage-context.sh`) |
-| Откуда Dockerfile | `time-for-everything_deploy/docker/Dockerfile` и `time-for-everything_deploy/.dockerignore` (рабочие файлы deploy-каталога) |
-| Скрипт сборки | `time-for-everything_deploy/scripts/build-local.sh` → `stage-context.sh` → `docker buildx build --load` |
-| Базовые образы | `node:24-bookworm-slim` (сборка интерфейса), `python:3.13-slim-bookworm` (запуск); без кэша Docker скачает их из интернета |
-| Builder на Mac | `desktop-linux` (звёздочка в `docker buildx ls` стоит у чужого `pdf-book-splitter-builder` — его не трогаем) |
-| Платформа NAS | `x86_64` → собираем `linux/amd64` |
-| Образ из первой установки (исторически) | По [NAS-FIRST-INSTALL.md](NAS-FIRST-INSTALL.md): `time-for-everything:nas-20261009-114259`, приложение `028fbb75…`. **Это запись в инструкции, а не наблюдение сегодня** — истина на NAS: `docker inspect` контейнера (раздел 4.1) |
-| Версия схемы, которую требует код | `20261006000002` (`REQUIRED_SCHEMA_VERSION` в `backend/app/db/session.py`; последняя миграция `20261006000002_session_revocations.sql`) |
-| Миграции в этом релизе | **Нет.** В `supabase/migrations/` только две исходные миграции, `REQUIRED_SCHEMA_VERSION` не изменился. На собранном коммите это проверяет раздел 2.1 |
-| Новые настройки в этом релизе | Параметры подключения к базе `DB_*`, **все необязательные**, со значениями по умолчанию (раздел 6.4) |
-| Миграции | `supabase/migrations/*.sql` + `scripts/db_migrate.py` приложения; сервер **сам миграции не применяет** |
-| Неизвестные ключи в `app.env` | Игнорируются (`extra="ignore"` в `backend/app/core/config.py`) — старый образ не сломается от новых ключей |
+| Репозиторий приложения (`APP`) | `/Users/fedor/RepoPrompt/ВсёУспею/time-for-everything` — восстановленная копия. Remote `origin` указывает на `https://github.com/matovykh/time-for-everything.git` |
+| Буква «ё» в пути | macOS может хранить имя каталога в разложенном виде (`е` + знак `¨`). Файловая система находит каталог в любом варианте, но **строки** могут не совпасть. Поэтому блоки делают `cd` по пути, а значение `APP` берут из `git rev-parse --show-toplevel` и не сравнивают его с набранным текстом. Если `cd` не находит каталог, наберите `cd ` (с пробелом), перетащите папку из Finder в окно терминала и нажмите Enter |
+| Ветка | `recovery/provisioning-diagnostics`, основана на `620e834` (`main` и `origin/main` тоже указывают на `620e834`). Upstream у ветки ещё нет |
+| Deploy-репозиторий (`DEPLOY`) | `$APP/time-for-everything_deploy`. Это **отдельный** вложенный Git-репозиторий (в `.gitignore` приложения: `/time-for-everything_deploy/`) на коммите `bcb583c`, remote `matovykh/time-for-everything_deploy` |
+| Compose в deploy-репозитории | Там записаны `127.0.0.1:${TFE_HTTP_PORT:-8000}:8000` и **активный** `cpus: 1.0`. **Для NAS он не подходит: на NAS его не копировать.** Рабочая конфигурация — копия, которая уже лежит на NAS |
+| Что попадает в образ | `git archive` **закоммиченного** SHA: только `frontend/`, `backend/app/`, `backend/requirements.txt` (`scripts/stage-context.sh`). Незакоммиченные файлы в образ не попадают |
+| Сейчас на NAS (ожидается) | `time-for-everything:nas-20261010-210507-620e834`: приложение `620e834`, deploy `bcb583c`. Так записано в `~/tfe-transfer/build-info-nas-20261010-210507-620e834.txt`. Окончательно подтверждается командой `docker inspect` в разделе 4.1 |
+| Архивы на Mac | `~/tfe-transfer` (права `drwx------`): прежние архивы и `build-info`. Их не трогаем |
+| Резервные копии секретов | `~/tfe-rescue-20261012-123852` (права `drwx------`) содержит копию NAS-конфигурации с `app.env`. Каталог **вне репозитория**. Не открывать, не выводить через `cat`, не копировать в репозиторий, не прикладывать к сообщениям. Допустима только проверка прав командой `ls -ld` |
+| Версия схемы | `20261006000002` (`REQUIRED_SCHEMA_VERSION`). Миграций две: `…0001_init.sql` и `…0002_session_revocations.sql` |
+| Миграции в этом релизе | **Нет** |
+| Новые настройки | **Нет.** `app.env` не меняется |
+| `NAS-FIRST-INSTALL.md` | Был в старом репозитории, в восстановленной копии его нет. Все нужные факты повторены здесь |
 
-Файлы, нужные для сборки, найдены все: `frontend/package.json`, `frontend/package-lock.json`,
-`backend/requirements.txt`, `backend/app/main.py`, Dockerfile, `.dockerignore`. `frontend/dist/`
-игнорируется Git и собирается внутри Docker — это нормально.
+### Состав восстановительного патча — ровно шесть файлов
 
-**Важно: в образ попадает только закоммиченное.** Новый файл, который не добавлен в коммит
-(например, новый компонент или новая миграция), в образ **не попадёт**, даже если лежит на диске.
+| Файл | Что изменено |
+|---|---|
+| `backend/app/core/login_stages.py` | Фиксированный список имён этапов, поле `index=N`, функция `optional_stage` |
+| `backend/app/modules/accounts/provisioning.py` | Подэтапы `ensure_profile.*` вокруг **уже существующих** вызовов `get`/`add`/`flush`/`commit`/`rollback`. Новых `flush` не добавлено |
+| `backend/app/modules/accounts/router.py` | Вход передаёт свой `request_id` в `ensure_profile` |
+| `backend/tests/test_login_diagnostics.py` | Тесты: порядок и число вызовов, отсутствие персональных данных в логе |
+| `docs/NAS-UPDATE.md` | Эта инструкция |
+| `docs/LOGIN-DIAGNOSTICS.md` | Как читать лог |
 
-### Особенности именно вашего Mac
-
-- `pg_dump` **не установлен**. Для этого релиза он не нужен (миграций нет); понадобится в будущем
-  релизе с миграциями (раздел 5).
-- `gh` (GitHub CLI) не установлен: результат CI смотрите на сайте GitHub, вкладка **Actions**.
-- В `~/tfe-transfer` лежит старый архив с неверсионированным именем `time-for-everything.tar`.
-  Новые архивы ниже получают имя с тегом, чтобы их нельзя было перепутать.
-- **В рабочей копии deploy-репозитория изменён `compose/compose.production.yaml`:** там жёстко записано
-  `"192.168.1.97:8000:8000"` и активный `cpus: 1.0`. **Эта версия не подходит для вашего NAS**
-  (порт 8000 занят, `cpus` не поддерживается ядром). Её **не копируем на NAS** и не используем как
-  образец. Рабочая конфигурация — копия, которая уже лежит на NAS.
+`backend/app/db/session.py` в этом патче **не меняется** (он уже изменён в `620e834`).
 
 ---
 
-## 1. Сохранить изменения в Git (на Mac)
+## 1. Git на Mac
 
-**Где: новое окно «Терминал» на Mac.**
+Начало каждого Mac-блока одинаковое: `cd` в каталог приложения, вычисление `APP` и проверки. Это
+повторение сделано намеренно.
+
+### 1.1. Проверка окружения (только чтение)
 
 ```sh
-cd /Users/fedor/RepoPrompt/time-for-everything
-/bin/bash --noprofile --norc
-APP=/Users/fedor/RepoPrompt/time-for-everything
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: каталог не является Git-репозиторием"; exit 1; }
 DEPLOY="$APP/time-for-everything_deploy"
+[ "$(basename "$APP")" = "time-for-everything" ] || { echo "СТОП: неожиданный APP=$APP"; exit 1; }
+[ -f "$APP/backend/app/main.py" ] && [ -f "$APP/tests/security/scan_secrets.py" ] || { echo "СТОП: в APP нет файлов приложения"; exit 1; }
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: текущая ветка не recovery/provisioning-diagnostics"; exit 1; }
+[ "$(git -C "$APP" config --get remote.origin.url)" = "https://github.com/matovykh/time-for-everything.git" ] || { echo "СТОП: неожиданный origin"; exit 1; }
+[ -d "$DEPLOY" ] || { echo "СТОП: нет deploy-каталога"; exit 1; }
+[ "$(git -C "$DEPLOY" config --get remote.origin.url)" = "https://github.com/matovykh/time-for-everything_deploy.git" ] || { echo "СТОП: неожиданный origin deploy"; exit 1; }
+echo "APP=$APP"
+git -C "$APP" log -1 --format='app    %h %s'
+git -C "$DEPLOY" log -1 --format='deploy %h %s'
+ls -ld "$HOME/tfe-rescue-20261012-123852" "$HOME/tfe-transfer"
+echo "ОК: окружение проверено"
+)
 ```
 
-### 1.1. Посмотреть, что изменено
-
-```sh
-git -C "$APP" status --short
-git -C "$APP" diff --stat
-```
-
-Буквы слева: `M` — изменён, `??` — новый, ещё не отслеживаемый файл, `D` — удалён.
-
-Изменения в приложении делятся на три группы.
-
-**А. Ваши предыдущие изменения документации** — были до начала этих работ:
+Ожидается (если коммит из раздела 1.6 ещё не сделан):
 
 ```text
- M README.md
- M docs/ARCHITECTURE.md
- M docs/README.md
- M supabase/README.md
-?? docs/NAS-FIRST-INSTALL.md
-?? docs/RELOCATION-AUDIT.md
-?? docs/SETUP-SUPABASE-SYNOLOGY.md
+APP=/Users/fedor/RepoPrompt/ВсёУспею/time-for-everything
+app    620e834 diagnostics: trace login stages safely
+deploy bcb583c Initial commit
+drwx------ … /Users/fedor/tfe-rescue-20261012-123852
+drwx------ … /Users/fedor/tfe-transfer
+ОК: окружение проверено
 ```
 
-**Б. Эта инструкция** — новый файл, создан в рамках текущего обновления:
+Если у `tfe-rescue-…` права шире, чем `drwx------`, выполните `chmod 700 "$HOME/tfe-rescue-20261012-123852"`.
+Эта команда меняет только права и ничего не удаляет.
 
-```text
-?? docs/NAS-UPDATE.md
-```
-
-**В. Новая функциональность** (backend, frontend, тесты, шаблоны настроек) — точный список
-в разделе 1.4.
-
-**Каждый файл в `status` должен попасть в одну из групп.** Если видите что-то сверх этого,
-в том числе `.env`, `app.env`, `*.tar`, `*.dump`, ключи, — не добавляйте и остановитесь.
-Исключение: шаблоны `.env.example` и `backend/.env.example` — в них только заглушки, они
-входят в группу В.
-
-### 1.2. Проверка на секреты — именно того, что пойдёт в Git
-
-Сканер `tests/security/scan_secrets.py` без аргументов проверяет **все файлы на диске**,
-включая игнорируемые Git. На вашем Mac такой полный запуск **не проходит**: он находит HIGH
-`postgres_dsn_with_password` в `.claude/settings.local.json` — локальном файле настроек инструментов,
-который игнорируется Git. **Не открывайте и не выводите этот файл в терминал или чат.**
-Чистить его для коммита не нужно; нужно лишь гарантировать, что он никогда не попадёт в Git.
-(Удалить из него пароли и, если они настоящие, сменить их — разумно, но это отдельное решение.)
-
-Поэтому сканируем **точную выгрузку** того, что будет закоммичено. Сам сканер и его правила
-не меняем и не обходим.
-
-**А. Перед каждым `git commit`** (после `git add` в 1.3 и 1.4) — выгрузка индекса, то есть
-всех отслеживаемых файлов в том виде, в котором они попадут в коммит:
+### 1.2. Что изменено
 
 ```sh
-git -C "$APP" diff --cached --name-only -- .claude
-git -C "$APP" ls-files -- .claude/settings.local.json
-git -C "$APP" check-ignore -v .claude/settings.local.json
-
-EXPORT=$(mktemp -d "${TMPDIR:-/tmp}/tfe-scan.XXXXXX")
-git -C "$APP" checkout-index -a --prefix="$EXPORT/"
-"$APP/backend/.venv/bin/python" -I "$APP/tests/security/scan_secrets.py" "$EXPORT"; echo "exit=$?"
-rm -rf -- "$EXPORT"
-```
-
-- Первые две команды — **пустой вывод**: из `.claude/` ничего не добавлено, `settings.local.json`
-  не отслеживается. Если что-то выведено — `git -C "$APP" restore --staged -- .claude` и не коммитьте.
-- Третья печатает правило `.gitignore`, которое скрывает файл. Никогда не используйте `git add -f`.
-- Сканер должен завершиться с **`exit=0`** и без строк `HIGH`. Любая HIGH в выгрузке — блокер,
-  в том числе в тестах: например, поддельная строка подключения с паролем в `backend/tests/…` тоже
-  исправляется в тесте, а не обходится. Сканер показывает файл и строку, сам секрет —
-  только в сокращённом виде.
-
-**Б. Перед `git push`** — выгрузка ровно того коммита, который уйдёт на GitHub и будет собран:
-
-```sh
-EXPORT=$(mktemp -d "${TMPDIR:-/tmp}/tfe-scan.XXXXXX")
-git -C "$APP" archive HEAD | tar -x -C "$EXPORT"
-"$APP/backend/.venv/bin/python" -I "$APP/tests/security/scan_secrets.py" "$EXPORT"; echo "exit=$?"
-rm -rf -- "$EXPORT"
-```
-
-Ожидается `exit=0`. В CI (Source CI) тот же сканер запускается по чистому checkout — это
-независимая вторая проверка. Полный запуск по диску без аргументов можно делать для справки,
-но считать его пройденным нельзя, пока в `.claude/settings.local.json` лежат строки с паролями.
-
-### 1.3. Коммит документации — отдельно (по желанию)
-
-Группы А и Б удобно сохранить **отдельным коммитом**, чтобы документация не смешивалась
-с кодом. Решение за вами: группу А можно закоммитить и отдельно от Б. Добавляем **явные пути**,
-не `git add .`:
-
-```sh
-git -C "$APP" add -- README.md docs/ARCHITECTURE.md docs/README.md supabase/README.md \
-  docs/NAS-FIRST-INSTALL.md docs/RELOCATION-AUDIT.md docs/SETUP-SUPABASE-SYNOLOGY.md docs/NAS-UPDATE.md
-git -C "$APP" diff --cached --stat
-```
-
-Убедитесь, что в списке `--cached` только эти файлы. Затем:
-
-```sh
-git -C "$APP" commit -m "docs: NAS first install, relocation audit and update runbook"
-```
-
-Документация не попадает в образ, поэтому этот коммит на сборку не влияет. Он нужен, чтобы рабочая
-копия была чистой, а `HEAD`, из которого собирается релиз, содержал и инструкции.
-Если агенты ещё правят `README.md` или `docs/*`, сделайте этот коммит **после** их завершения.
-
-### 1.4. Коммит новой функциональности
-
-Сначала снова посмотрите оставшиеся изменения, включая новые файлы во вложенных папках:
-
-```sh
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: не та ветка"; exit 1; }
 git -C "$APP" status --short --untracked-files=all
+git -C "$APP" diff --stat
+)
 ```
 
-Добавляйте **только поименно перечисленные файлы**, не папки целиком (`backend/app`, `frontend/src`,
-`tests` и т. п. могут захватить случайные файлы).
+Ожидаются только шесть файлов из таблицы выше (` M` — изменён). Если видите что-то ещё, особенно `.env`,
+`app.env`, `*.tar`, `*.dump`, `*.bak`, ключи, файлы из `.claude/` или `tfe-rescue`, **не добавляйте** это в
+коммит. Посторонние незакоммиченные файлы на сборку не влияют, потому что собирается коммит, а не диск.
 
-> **Итоговый список исправлений проверен 10 октября 2026 года.** Перед коммитом
-> сверьте его с `status`: более поздние или посторонние изменения не добавляйте автоматически.
+### 1.3. Тесты (на рабочих файлах)
 
 ```sh
-git -C "$APP" add -- \
-  .env.example \
-  backend/.env.example \
-  backend/app/core/config.py \
-  backend/app/core/deps.py \
-  backend/app/core/errors.py \
-  backend/app/db/errors.py \
-  backend/app/db/session.py \
-  backend/app/modules/administration/router.py \
-  backend/tests/test_db_robustness.py \
-  docs/API.md \
-  frontend/src/app/App.tsx \
-  frontend/src/app/session.tsx \
-  frontend/src/features/auth/AuthScreens.tsx \
-  frontend/src/shared/api/client.ts \
-  frontend/src/shared/api/endpoints.ts \
-  frontend/src/shared/ui/States.tsx \
-  frontend/src/test/mockApi.ts \
-  frontend/src/test/resilience.test.tsx
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything/backend" || { echo "СТОП: нет каталога backend"; exit 1; }
+[ -x .venv/bin/python ] || { echo "СТОП: нет backend/.venv"; exit 1; }
+.venv/bin/python -m pytest -q || { echo "СТОП: pytest завершился с ошибкой, коммит не делать"; exit 1; }
+echo "ОК: pytest"
+.venv/bin/ruff check --config pyproject.toml app tests ../scripts || { echo "СТОП: ruff нашёл ошибки, коммит не делать"; exit 1; }
+echo "ОК: ruff"
+)
 ```
 
-- `backend/app/db/errors.py`, `backend/tests/test_db_robustness.py`, `frontend/src/test/resilience.test.tsx` —
-  **новые** файлы (`??`). Особенно важен `backend/app/db/errors.py`: Без него сборка из коммита получится без
-  модуля, который импортирует код, и не запустится. Проверяйте каждый `??` в итоговом списке.
-- Шаблоны `.env.example` и `backend/.env.example` коммитятся вместе с кодом настроек.
-  Перед добавлением убедитесь через `git -C "$APP" diff -- .env.example backend/.env.example`, что там
-  только заглушки и числа по умолчанию, без настоящих адресов и ключей.
-- Новые или изменённые тесты (`backend/tests/…`, `tests/…`, `frontend/src/test/…`) добавляются
-  так же поименно — в образ они не попадают, но нужны CI.
-- В этом релизе **нет** файлов `supabase/migrations/…`. Если такой файл появился в `status`,
-  это уже другой релиз: остановитесь и перечитайте раздел 5.
-- Если изменился `frontend/package.json`, добавляйте его вместе с `frontend/package-lock.json`.
+Ожидаются `ОК: pytest` (у backend-агента было `205 passed, 4 skipped`; пропущены тесты, которым нужна
+отдельная PostgreSQL) и `ОК: ruff`. Любой сбой тестов или ruff останавливает блок на строке `СТОП: …`.
+Дальше не идите.
 
-Проверьте, что именно уйдёт в коммит:
+### 1.4. Добавить в индекс ровно шесть файлов
+
+`git add` получает только явные пути. Блок проверяет, что в индексе **ровно** эти шесть файлов и ничего
+больше. Команда `git add` записана одной строкой.
 
 ```sh
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+[ "$(basename "$APP")" = "time-for-everything" ] && [ -f "$APP/backend/app/main.py" ] || { echo "СТОП: неожиданный APP=$APP"; exit 1; }
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: не та ветка"; exit 1; }
+git -C "$APP" add -- backend/app/core/login_stages.py backend/app/modules/accounts/provisioning.py backend/app/modules/accounts/router.py backend/tests/test_login_diagnostics.py docs/LOGIN-DIAGNOSTICS.md docs/NAS-UPDATE.md || { echo "СТОП: git add не выполнен"; exit 1; }
+EXPECTED=$(printf '%s\n' backend/app/core/login_stages.py backend/app/modules/accounts/provisioning.py backend/app/modules/accounts/router.py backend/tests/test_login_diagnostics.py docs/LOGIN-DIAGNOSTICS.md docs/NAS-UPDATE.md)
+ACTUAL=$(git -C "$APP" diff --cached --name-only) || { echo "СТОП: не удалось прочитать индекс"; exit 1; }
 git -C "$APP" diff --cached --stat
-git -C "$APP" status --short
+if [ "$ACTUAL" = "$EXPECTED" ]; then echo "ОК: в индексе ровно шесть файлов"; else echo "СТОП: состав индекса отличается. В индексе:"; printf '%s\n' "$ACTUAL"; exit 1; fi
+)
 ```
 
-В выводе `status` строки с буквой в **первой** колонке будут закоммичены; строки `??` и ` M`
-(буква во второй колонке) — нет. После коммита в `status` не должно остаться ничего из
-`backend/app/`, `frontend/` из списка исправлений — иначе исправления не попадут в образ.
-Посторонние изменения документации можно оставить незакоммиченными: сборка использует выбранный SHA.
+- Если в индексе есть **лишний** файл, уберите его из индекса командой
+  `git -C "$HOME/RepoPrompt/ВсёУспею/time-for-everything" restore --staged -- <точный-путь>`. Команда меняет
+  только индекс, содержимое файла на диске остаётся прежним. Затем повторите блок.
+- Если какого-то из шести файлов **нет** в списке (он не изменён), остановитесь и выясните почему. Не
+  коммитьте неполный патч.
+- Никогда не используйте `git add .`, `git add -A`, `git add -f`, `git commit -a`.
+
+### 1.5. Сканирование выгрузки индекса на секреты
+
+Сканируется именно то, что войдёт в коммит: все отслеживаемые файлы в том виде, в каком они лежат в
+индексе. Выгрузка проверяется **до** запуска сканера. Временный каталог остаётся на месте.
 
 ```sh
-git -C "$APP" commit -m "<короткое описание изменений>"
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+[ "$(basename "$APP")" = "time-for-everything" ] && [ -f "$APP/tests/security/scan_secrets.py" ] || { echo "СТОП: неожиданный APP=$APP"; exit 1; }
+PY="$APP/backend/.venv/bin/python"
+[ -x "$PY" ] || { echo "СТОП: нет $PY"; exit 1; }
+CLAUDE_TRACKED=$(git -C "$APP" ls-files -- .claude) || { echo "СТОП: git ls-files"; exit 1; }
+[ -z "$CLAUDE_TRACKED" ] || { echo "СТОП: в индексе есть файлы из .claude"; exit 1; }
+umask 077
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/tfe-scan-index.XXXXXX") || { echo "СТОП: mktemp не сработал"; exit 1; }
+[ -n "$WORK" ] && [ -d "$WORK" ] || { echo "СТОП: временный каталог не создан"; exit 1; }
+mkdir "$WORK/tree" || { echo "СТОП: mkdir"; exit 1; }
+git -C "$APP" checkout-index --all --prefix="$WORK/tree/" || { echo "СТОП: выгрузка индекса не удалась"; exit 1; }
+[ -f "$WORK/tree/backend/app/modules/accounts/provisioning.py" ] && [ -f "$WORK/tree/docs/NAS-UPDATE.md" ] || { echo "СТОП: выгрузка неполная"; exit 1; }
+"$PY" -I "$APP/tests/security/scan_secrets.py" "$WORK/tree" > "$WORK/scan.txt" 2>&1
+RC=$?
+tail -n 1 "$WORK/scan.txt"
+echo "exit=$RC"
+grep -q -F 'scan_secrets: 0 finding(s), 0 HIGH,' "$WORK/scan.txt" && [ "$RC" -eq 0 ] || { echo "СТОП: есть находки. Файл и строка, без значений:"; awk '$1=="HIGH"||$1=="MEDIUM"{print $1, $2, $3}' "$WORK/scan.txt"; exit 1; }
+echo "ОК: выгрузка индекса чиста. Временный каталог оставлен: $WORK"
+)
 ```
 
-### 1.5. Отправить на GitHub
+Ожидается:
 
-Сначала выполните проверку **Б** из раздела 1.2 (выгрузка `HEAD`) — `exit=0`. Затем:
+```text
+scan_secrets: 0 finding(s), 0 HIGH, scanned /var/folders/…/tfe-scan-index.XXXXXX/tree
+exit=0
+ОК: выгрузка индекса чиста. Временный каталог оставлен: …
+```
+
+- Любая находка (`HIGH` или `MEDIUM`) — **блокер**. Сканер и его правила не меняем и не обходим. Сам секрет
+  блок не печатает, только тип, файл и строку.
+- Полный запуск сканера без аргументов проверяет и файлы, которые Git игнорирует. Это справочная проверка,
+  она не заменяет сканирование выгрузки.
+
+### 1.6. Коммит
 
 ```sh
-git -C "$APP" push origin main
-git -C "$APP" fetch origin
-git -C "$APP" status -sb
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: не та ветка"; exit 1; }
+EXPECTED=$(printf '%s\n' backend/app/core/login_stages.py backend/app/modules/accounts/provisioning.py backend/app/modules/accounts/router.py backend/tests/test_login_diagnostics.py docs/LOGIN-DIAGNOSTICS.md docs/NAS-UPDATE.md)
+ACTUAL=$(git -C "$APP" diff --cached --name-only) || { echo "СТОП: не удалось прочитать индекс"; exit 1; }
+[ "$ACTUAL" = "$EXPECTED" ] || { echo "СТОП: состав индекса изменился, повторите 1.4"; exit 1; }
+PY="$APP/backend/.venv/bin/python"
+[ -x "$PY" ] && [ -f "$APP/tests/security/scan_secrets.py" ] || { echo "СТОП: нет python или сканера"; exit 1; }
+CLAUDE_TRACKED=$(git -C "$APP" ls-files -- .claude) || { echo "СТОП: git ls-files"; exit 1; }
+[ -z "$CLAUDE_TRACKED" ] || { echo "СТОП: в индексе есть файлы из .claude"; exit 1; }
+TREE=$(git -C "$APP" write-tree) || { echo "СТОП: git write-tree не выполнен"; exit 1; }
+[ -n "$TREE" ] || { echo "СТОП: пустой идентификатор дерева"; exit 1; }
+umask 077
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/tfe-scan-commit.XXXXXX") || { echo "СТОП: mktemp не сработал"; exit 1; }
+[ -n "$WORK" ] && [ -d "$WORK" ] || { echo "СТОП: временный каталог не создан"; exit 1; }
+git -C "$APP" archive --format=tar -o "$WORK/index-tree.tar" "$TREE" || { echo "СТОП: выгрузка дерева индекса не удалась"; exit 1; }
+[ -s "$WORK/index-tree.tar" ] || { echo "СТОП: архив пустой"; exit 1; }
+mkdir "$WORK/tree" || { echo "СТОП: mkdir"; exit 1; }
+tar -xf "$WORK/index-tree.tar" -C "$WORK/tree" || { echo "СТОП: распаковка не удалась"; exit 1; }
+[ -f "$WORK/tree/backend/app/modules/accounts/provisioning.py" ] && [ -f "$WORK/tree/docs/NAS-UPDATE.md" ] || { echo "СТОП: выгрузка неполная"; exit 1; }
+"$PY" -I "$APP/tests/security/scan_secrets.py" "$WORK/tree" > "$WORK/scan.txt" 2>&1
+RC=$?
+tail -n 1 "$WORK/scan.txt"
+echo "exit=$RC TREE=$TREE"
+grep -q -F 'scan_secrets: 0 finding(s), 0 HIGH,' "$WORK/scan.txt" && [ "$RC" -eq 0 ] || { echo "СТОП: есть находки, коммит не создан. Файл и строка, без значений:"; awk '$1=="HIGH"||$1=="MEDIUM"{print $1, $2, $3}' "$WORK/scan.txt"; exit 1; }
+TREE_NOW=$(git -C "$APP" write-tree) || { echo "СТОП: git write-tree не выполнен"; exit 1; }
+[ "$TREE_NOW" = "$TREE" ] || { echo "СТОП: индекс изменился после сканирования, коммит не создан. Повторите блок"; exit 1; }
+git -C "$APP" commit -m "diagnostics: trace ensure_profile provisioning sub-stages" || { echo "СТОП: коммит не создан"; exit 1; }
+HEAD_TREE=$(git -C "$APP" rev-parse --verify 'HEAD^{tree}') || { echo "СТОП: нет HEAD"; exit 1; }
+[ "$HEAD_TREE" = "$TREE" ] || { echo "СТОП: дерево коммита не совпадает с просканированным. Push не делать, сообщите"; exit 1; }
+git -C "$APP" log -1 --stat --format='%H %s'
+echo "ОК: коммит создан из просканированного дерева $TREE. Временный каталог оставлен: $WORK"
+)
 ```
 
-Первая строка должна быть `## main...origin/main` **без** `[ahead …]` или `[behind …]`.
-Если push отклонён (`rejected`, `non-fast-forward`) — остановитесь. Не используйте `--force`:
-сначала выясните, откуда на GitHub взялись чужие коммиты.
+Как блок связывает сканирование и коммит:
 
-Откройте `https://github.com/matovykh/time-for-everything/actions` и дождитесь зелёного
-**Source CI** для этого коммита. Красный CI — повод не выкатывать сборку на NAS.
+- `git write-tree` выдаёт идентификатор **точного содержимого индекса**. Выгружается и сканируется именно
+  это дерево (`git archive <TREE>`), а не просто проверяется список имён файлов.
+- Перед коммитом `write-tree` вызывается ещё раз. Если индекс успел измениться (кто-то добавил файл или
+  правку), идентификатор будет другим, и коммит **не создаётся**.
+- После коммита `HEAD^{tree}` сравнивается с просканированным деревом. Совпадение значит, что в коммите ровно
+  то, что проверено сканером.
+- Раздел 1.5 остаётся ранней проверкой, а решающая проверка — этот блок. Временный каталог
+  `tfe-scan-commit.*` не удаляется.
 
-### 1.6. Deploy-репозиторий
+Ожидается: `scan_secrets: 0 finding(s), 0 HIGH, …`, `exit=0`, `6 files changed` и `ОК: коммит создан
+из просканированного дерева …`. Коммит ложится на ветку `recovery/provisioning-diagnostics`, а `main` не
+меняется.
 
-Сборка использует `docker/Dockerfile`, `.dockerignore` и `scripts/` **из рабочего каталога** deploy.
-Они должны совпадать с закоммиченной версией:
+### 1.7. Сканирование выгрузки `HEAD`
+
+Сканируется ровно тот коммит, который уйдёт на GitHub и будет собран. Архив сначала пишется в файл
+(без конвейера `|`, который может скрыть ошибку `git archive`). Затем проверяется, что он не пустой, после
+этого распаковывается и только потом сканируется.
 
 ```sh
-git -C "$DEPLOY" status --short -- docker .dockerignore scripts
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+[ "$(basename "$APP")" = "time-for-everything" ] && [ -f "$APP/tests/security/scan_secrets.py" ] || { echo "СТОП: неожиданный APP=$APP"; exit 1; }
+PY="$APP/backend/.venv/bin/python"
+[ -x "$PY" ] || { echo "СТОП: нет $PY"; exit 1; }
+SHA=$(git -C "$APP" rev-parse --verify 'HEAD^{commit}') || { echo "СТОП: нет HEAD"; exit 1; }
+umask 077
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/tfe-scan-head.XXXXXX") || { echo "СТОП: mktemp не сработал"; exit 1; }
+[ -n "$WORK" ] && [ -d "$WORK" ] || { echo "СТОП: временный каталог не создан"; exit 1; }
+git -C "$APP" archive --format=tar -o "$WORK/head.tar" "$SHA" || { echo "СТОП: git archive не удался"; exit 1; }
+[ -s "$WORK/head.tar" ] || { echo "СТОП: архив пустой"; exit 1; }
+mkdir "$WORK/tree" || { echo "СТОП: mkdir"; exit 1; }
+tar -xf "$WORK/head.tar" -C "$WORK/tree" || { echo "СТОП: распаковка не удалась"; exit 1; }
+[ -f "$WORK/tree/backend/app/modules/accounts/provisioning.py" ] && [ -f "$WORK/tree/docs/NAS-UPDATE.md" ] || { echo "СТОП: выгрузка неполная"; exit 1; }
+"$PY" -I "$APP/tests/security/scan_secrets.py" "$WORK/tree" > "$WORK/scan.txt" 2>&1
+RC=$?
+tail -n 1 "$WORK/scan.txt"
+echo "exit=$RC SHA=$SHA"
+grep -q -F 'scan_secrets: 0 finding(s), 0 HIGH,' "$WORK/scan.txt" && [ "$RC" -eq 0 ] || { echo "СТОП: есть находки. Файл и строка, без значений:"; awk '$1=="HIGH"||$1=="MEDIUM"{print $1, $2, $3}' "$WORK/scan.txt"; exit 1; }
+echo "ОК: HEAD чист. Временный каталог оставлен: $WORK"
+)
 ```
 
-**Ожидается пустой вывод.** Если там что-то есть — остановитесь: сборка была бы невоспроизводимой.
+Ожидается `scan_secrets: 0 finding(s), 0 HIGH, …`, `exit=0` и SHA нового коммита. Запишите SHA.
 
-Остальные изменения deploy-репозитория (`README.md`, `docs/*`, `compose/compose.production.yaml`)
-на сборку не влияют. Коммитить их для этого обновления **не требуется**. Если решите сохранить их
-отдельно, учтите: изменённый compose с `192.168.1.97:8000:8000` и активным `cpus: 1.0` не
-соответствует вашему NAS — обдумайте это до коммита. Push deploy-репозитория:
-`git -C "$DEPLOY" push origin main`, тоже без `--force`.
+### 1.8. Push ветки восстановления
+
+В `main` ничего не отправляется. Push выполняется явной ссылкой на ветку, без `--force`. После push блок
+проверяет, что на GitHub лежит тот же SHA.
+
+```sh
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: не та ветка"; exit 1; }
+SHA=$(git -C "$APP" rev-parse --verify 'HEAD^{commit}') || { echo "СТОП: нет HEAD"; exit 1; }
+git -C "$APP" push origin refs/heads/recovery/provisioning-diagnostics:refs/heads/recovery/provisioning-diagnostics || { echo "СТОП: push отклонён, --force не использовать"; exit 1; }
+REMOTE=$(git -C "$APP" ls-remote origin refs/heads/recovery/provisioning-diagnostics) || { echo "СТОП: ls-remote"; exit 1; }
+REMOTE_SHA=${REMOTE%%[[:space:]]*}
+[ "$REMOTE_SHA" = "$SHA" ] || { echo "СТОП: на GitHub другой SHA: $REMOTE_SHA"; exit 1; }
+echo "ОК: на GitHub ветка recovery/provisioning-diagnostics = $SHA"
+)
+```
+
+- Если push отклонён (`rejected`, `non-fast-forward`), остановитесь и выясните, откуда на GitHub чужие
+  коммиты. `--force` не используйте.
+- Откройте `https://github.com/matovykh/time-for-everything/actions` и дождитесь **зелёного Source CI** для
+  этого SHA (workflow запускается при push в любую ветку). Если CI красный, сборку на NAS не выкатывайте.
+- Слияние в `main` — отдельное решение после проверки на NAS, через обычный pull request. В этом документе
+  его нет.
 
 ---
 
-## 2. Собрать новый образ (на Mac)
+## 2. Сборка образа на Mac
 
-**Где: тот же Bash. Docker Desktop запущен.**
-
-```sh
-APP_SHA=$(git -C "$APP" rev-parse HEAD)
-APP_SHORT=$(git -C "$APP" rev-parse --short=7 HEAD)
-DEPLOY_SHA=$(git -C "$DEPLOY" rev-parse HEAD)
-TFE_TAG="nas-$(date +%Y%m%d-%H%M%S)-$APP_SHORT"
-TFE_IMAGE="time-for-everything:$TFE_TAG"
-printf 'APP_SHA=%s\nDEPLOY_SHA=%s\nTFE_IMAGE=%s\n' "$APP_SHA" "$DEPLOY_SHA" "$TFE_IMAGE"
-```
-
-Перед этим убедитесь, что рабочая копия чиста (всё нужное закоммичено) и `HEAD` уже отправлен:
-`git -C "$APP" status -sb` → только строка `## main...origin/main`.
-
-Запишите `TFE_IMAGE` — например `time-for-everything:nas-20261010-101500-abc1234`.
-Тег содержит дату и начало SHA: по нему всегда видно, какая версия кода внутри.
-
-### 2.1. Проверить версию схемы
+### 2.1. Проверки перед сборкой (только чтение)
 
 ```sh
-bash "$DEPLOY/scripts/source-schema-version.sh" "$APP"
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+DEPLOY="$APP/time-for-everything_deploy"
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: не та ветка"; exit 1; }
+APP_SHA=$(git -C "$APP" rev-parse --verify 'HEAD^{commit}') || { echo "СТОП: нет HEAD"; exit 1; }
+REMOTE=$(git -C "$APP" ls-remote origin refs/heads/recovery/provisioning-diagnostics) || { echo "СТОП: ls-remote"; exit 1; }
+[ "${REMOTE%%[[:space:]]*}" = "$APP_SHA" ] || { echo "СТОП: HEAD не совпадает с веткой на GitHub, сначала 1.8"; exit 1; }
+DIRTY=$(git -C "$APP" status --short -- supabase backend/app/db/session.py) || { echo "СТОП: git status"; exit 1; }
+[ -z "$DIRTY" ] || { echo "СТОП: незакоммиченные изменения в supabase или session.py"; exit 1; }
+SCHEMA=$(bash "$DEPLOY/scripts/source-schema-version.sh" "$APP") || { echo "СТОП: проверка схемы не прошла"; exit 1; }
+echo "$SCHEMA"
+[ "$SCHEMA" = "schema_version=20261006000002" ] || { echo "СТОП: схема изменилась, это другой релиз"; exit 1; }
 git -C "$APP" ls-tree --name-only "$APP_SHA" -- supabase/migrations/
+MISSING=0
+for n in ensure_profile.profile_get ensure_profile.email_commit ensure_profile.profile_add ensure_profile.profile_flush ensure_profile.activity_add ensure_profile.activity_flush ensure_profile.activity_children_add ensure_profile.wallet_world_add ensure_profile.final_flush ensure_profile.active_world_flush ensure_profile.commit ensure_profile.integrity_rollback ensure_profile.integrity_reread; do git -C "$APP" grep -q -F "\"$n\"" "$APP_SHA" -- backend/app/core/login_stages.py || { echo "НЕТ в коммите: $n"; MISSING=1; }; done
+[ "$MISSING" -eq 0 ] || { echo "СТОП: в коммите нет диагностических этапов"; exit 1; }
+[ "$(git -C "$DEPLOY" rev-parse --short=7 HEAD)" = "bcb583c" ] || { echo "СТОП: deploy не на bcb583c"; exit 1; }
+DDIRTY=$(git -C "$DEPLOY" status --short -- docker .dockerignore scripts) || { echo "СТОП: git status deploy"; exit 1; }
+[ -z "$DDIRTY" ] || { echo "СТОП: в deploy изменены docker, .dockerignore или scripts"; exit 1; }
+echo "ОК: можно собирать APP_SHA=$APP_SHA"
+)
 ```
 
-**Ожидается для этого релиза:**
+Ожидается:
 
 ```text
 schema_version=20261006000002
 supabase/migrations/20261006000001_init.sql
 supabase/migrations/20261006000002_session_revocations.sql
+ОК: можно собирать APP_SHA=<40 символов нового коммита>
 ```
 
-Это та же версия схемы, что у сейчас работающей установки (её `ready` показывает
-`schema: ok` именно для `20261006000002`). Значит, **базу в этом обновлении не трогаем**,
-раздел 5 пропускается.
+Схема та же, что у работающей установки, поэтому **базу не трогаем** (раздел 5).
 
-Если вывод другой (другой `schema_version`, лишний файл миграции, ошибка скрипта) —
-**остановитесь**: это уже не тот релиз, под который написан быстрый путь.
+### 2.2. Сборка, архив и контрольная сумма
 
-### 2.2. Сборка
+Docker Desktop должен быть запущен. Тег **вычисляется**: `nas-<дата-время>-<первые 7 символов SHA>`.
+Старые и придуманные теги не используются. Если образ с таким тегом уже есть, блок останавливается и
+ничего не удаляет.
 
 ```sh
-cd "$DEPLOY"
-BUILD_BUILDER=desktop-linux BUILD_PLATFORM=linux/amd64 \
-  sh scripts/build-local.sh --app-dir "$APP" --sha "$APP_SHA" --tag "$TFE_IMAGE"
-```
-
-Успешное завершение:
-
-```text
-Built time-for-everything:nas-…-… (local test image, not a release).
-```
-
-- Сборка берёт **закоммиченный** `$APP_SHA`, а не файлы на диске.
-- Если видите `Tag … already exists` — заново задайте `TFE_TAG`/`TFE_IMAGE` (раздел 2), **не удаляйте**
-  существующие образы.
-- Пароли Supabase для сборки не нужны и не передаются.
-
-Проверьте архитектуру:
-
-```sh
-docker image inspect --format '{{.Os}}/{{.Architecture}}' "$TFE_IMAGE"
-```
-
-Ожидается **`linux/amd64`**. Если `linux/arm64` — образ не запустится на NAS (`exec format error`).
-
-### 2.3. Дополнительная проверка (необязательно, но полезно)
-
-Строит **отдельный** одноразовый образ с поддельными «секретами-приманками» и проверяет, что они нигде
-не утекают; базу не трогает. Порт 18080 на Mac может быть занят, поэтому задан 18081:
-
-```sh
-SMOKE_BUILDER=desktop-linux SMOKE_PLATFORM=linux/amd64 SMOKE_PORT=18081 \
-  sh tests/container_secret_smoke.sh --app-dir "$APP" --sha "$APP_SHA"
-```
-
----
-
-## 3. Сохранить архив и перенести на NAS
-
-### 3.1. На Mac
-
-```sh
+(
+cd "$HOME/RepoPrompt/ВсёУспею/time-for-everything" || { echo "СТОП: каталог приложения не найден"; exit 1; }
+APP=$(git rev-parse --show-toplevel) || { echo "СТОП: не Git"; exit 1; }
+DEPLOY="$APP/time-for-everything_deploy"
+[ -f "$DEPLOY/scripts/build-local.sh" ] || { echo "СТОП: нет build-local.sh"; exit 1; }
+[ "$(git -C "$APP" symbolic-ref --short HEAD)" = "recovery/provisioning-diagnostics" ] || { echo "СТОП: не та ветка"; exit 1; }
+APP_SHA=$(git -C "$APP" rev-parse --verify 'HEAD^{commit}') || { echo "СТОП: нет HEAD"; exit 1; }
+REMOTE=$(git -C "$APP" ls-remote origin refs/heads/recovery/provisioning-diagnostics) || { echo "СТОП: ls-remote"; exit 1; }
+[ "${REMOTE%%[[:space:]]*}" = "$APP_SHA" ] || { echo "СТОП: коммит не отправлен на GitHub"; exit 1; }
+APP_SHORT=$(git -C "$APP" rev-parse --short=7 "$APP_SHA") || { echo "СТОП: short SHA"; exit 1; }
+DEPLOY_SHA=$(git -C "$DEPLOY" rev-parse HEAD) || { echo "СТОП: deploy SHA"; exit 1; }
+SCHEMA=$(bash "$DEPLOY/scripts/source-schema-version.sh" "$APP") || { echo "СТОП: схема"; exit 1; }
+[ "$SCHEMA" = "schema_version=20261006000002" ] || { echo "СТОП: схема изменилась"; exit 1; }
+TFE_TAG="nas-$(date +%Y%m%d-%H%M%S)-$APP_SHORT"
+TFE_IMAGE="time-for-everything:$TFE_TAG"
+if docker image inspect "$TFE_IMAGE" >/dev/null 2>&1; then echo "СТОП: тег уже существует, запустите блок заново"; exit 1; fi
+cd "$DEPLOY" || { echo "СТОП: нет DEPLOY"; exit 1; }
+BUILD_BUILDER=desktop-linux BUILD_PLATFORM=linux/amd64 sh "$DEPLOY/scripts/build-local.sh" --app-dir "$APP" --sha "$APP_SHA" --tag "$TFE_IMAGE" || { echo "СТОП: сборка не удалась"; exit 1; }
+ARCH=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$TFE_IMAGE") || { echo "СТОП: образ не найден"; exit 1; }
+[ "$ARCH" = "linux/amd64" ] || { echo "СТОП: платформа $ARCH, нужна linux/amd64"; exit 1; }
 umask 077
-mkdir -p "$HOME/tfe-transfer"
-chmod 700 "$HOME/tfe-transfer"
+mkdir -p "$HOME/tfe-transfer" || { echo "СТОП: нет tfe-transfer"; exit 1; }
+cd "$HOME/tfe-transfer" || { echo "СТОП: cd tfe-transfer"; exit 1; }
 TAR="time-for-everything-$TFE_TAG.tar"
-docker save -o "$HOME/tfe-transfer/$TAR" "$TFE_IMAGE"
-cd "$HOME/tfe-transfer"
-shasum -a 256 "$TAR" > "$TAR.sha256"
-printf 'APP_SHA=%s\nDEPLOY_SHA=%s\nTFE_IMAGE=%s\nSCHEMA=%s\n' "$APP_SHA" "$DEPLOY_SHA" "$TFE_IMAGE" \
-  "$(bash "$DEPLOY/scripts/source-schema-version.sh" "$APP")" > "build-info-$TFE_TAG.txt"
+if [ -e "$TAR" ]; then echo "СТОП: файл $TAR уже есть"; exit 1; fi
+docker save -o "$TAR" "$TFE_IMAGE" || { echo "СТОП: docker save не удался"; exit 1; }
+[ -s "$TAR" ] || { echo "СТОП: архив пустой"; exit 1; }
+shasum -a 256 "$TAR" > "$TAR.sha256" || { echo "СТОП: shasum"; exit 1; }
+printf 'APP_SHA=%s\nAPP_BRANCH=recovery/provisioning-diagnostics\nDEPLOY_SHA=%s\nTFE_IMAGE=%s\nSCHEMA=%s\n' "$APP_SHA" "$DEPLOY_SHA" "$TFE_IMAGE" "$SCHEMA" > "build-info-$TFE_TAG.txt" || { echo "СТОП: build-info"; exit 1; }
 ls -l "$TAR" "$TAR.sha256" "build-info-$TFE_TAG.txt"
+echo "ОК: TFE_TAG=$TFE_TAG"
+)
 ```
 
-Архив около 80 МБ. Он содержит код приложения, но не пароли — всё равно не публикуйте его.
-
-### 3.2. Перенос — `scp -O` (буква O)
-
-```sh
-scp -O "$HOME/tfe-transfer/$TAR" "$HOME/tfe-transfer/$TAR.sha256" \
-  "$HOME/tfe-transfer/build-info-$TFE_TAG.txt" \
-  fedor.matovykh@192.168.1.97:/volume1/docker/tfe-transfer/
-```
-
-Предупреждение `Could not chdir to home directory…` ожидаемо и не мешает.
-
-**Не переносите** `compose.production.yaml`, `install-config.sh` и `app.env.example`: на NAS они уже
-настроены, а копия с Mac затёрла бы порт 18080 и отключённый лимит CPU. Новые настройки
-этого релиза вписываются вручную и только при необходимости (раздел 6.4).
+- **Запишите значение `TFE_TAG`** из последней строки. Оно нужно в разделах 3, 4.4, 6.1 и 7.1.
+- Сборка берёт закоммиченный `APP_SHA` через `git archive`, файлы с диска в образ не идут. Пароли Supabase
+  для сборки не нужны.
+- Сам `build-local.sh` после сборки убирает **собственный** временный каталог контекста сборки, который
+  создал через `mktemp`. Это внутренняя логика скрипта, вы такую команду не вводите.
+- Архив весит около 80 МБ. Паролей в нём нет, но публиковать его не нужно.
 
 ---
 
-## 4. Подготовить NAS: снимок текущего состояния и загрузка образа
+## 3. Перенос на NAS
 
-Приложение продолжает работать на старом образе всё это время.
+Подставьте свой `TFE_TAG` вместо `ВСТАВЬТЕ_TFE_TAG`.
+
+```sh
+(
+TFE_TAG='ВСТАВЬТЕ_TFE_TAG'
+cd "$HOME/tfe-transfer" || { echo "СТОП: нет ~/tfe-transfer"; exit 1; }
+TAR="time-for-everything-$TFE_TAG.tar"
+[ -s "$TAR" ] && [ -s "$TAR.sha256" ] && [ -s "build-info-$TFE_TAG.txt" ] || { echo "СТОП: нет файлов для тега $TFE_TAG"; exit 1; }
+shasum -a 256 -c "$TAR.sha256" || { echo "СТОП: контрольная сумма не совпала"; exit 1; }
+scp -O "$TAR" "$TAR.sha256" "build-info-$TFE_TAG.txt" fedor.matovykh@192.168.1.97:/volume1/docker/tfe-transfer/ || { echo "СТОП: scp не удался"; exit 1; }
+echo "ОК: перенесено"
+)
+```
+
+- `-O` (заглавная буква O) переключает `scp` на классический протокол: с SFTP-режимом на DSM он может не
+  работать. Предупреждение `Could not chdir to home directory…` ожидаемо.
+- **Не переносите** `compose.production.yaml`, `install-config.sh`, `app.env.example` и ничего из
+  `~/tfe-rescue-20261012-123852`. Конфигурация остаётся на NAS.
+
+---
+
+## 4. Подготовка NAS
 
 ```sh
 ssh fedor.matovykh@192.168.1.97
 ```
 
-**Дальше — на NAS.** Вставьте блок целиком (функция живёт до конца SSH-сессии):
+**Дальше всё выполняется на NAS.** Функция `tfe` существует **только внутри блока, где она определена**.
+Поэтому каждый NAS-блок, которому она нужна, сам определяет `D`, делает `cd`, проверки и определение
+`tfe`. Приложение продолжает работать на старом образе до раздела 6.
+
+### 4.1. Снимок текущего состояния (только чтение)
 
 ```sh
+(
 D=/volume1/docker/time-for-everything_deploy
-T=/volume1/docker/tfe-transfer
-tfe() {
-  sudo docker compose --project-name time-for-everything_deploy \
-    --env-file "$D/compose/deploy.env" \
-    -f "$D/compose/compose.production.yaml" "$@"
-}
-```
-
-### 4.1. Записать, что работает сейчас
-
-Источник истины — **запущенный контейнер**, а не документация и не память:
-
-```sh
+cd "$D" || { echo "СТОП: нет каталога $D"; exit 1; }
+sudo test -f "$D/compose/deploy.env" && sudo test -f "$D/compose/compose.production.yaml" && sudo test -f "$D/config/app.env" || { echo "СТОП: нет deploy.env, compose или app.env"; exit 1; }
+tfe() { sudo docker compose --project-name time-for-everything_deploy --env-file "$D/compose/deploy.env" -f "$D/compose/compose.production.yaml" "$@"; }
 tfe ps
-OLD_CID=$(tfe ps -q app)
-sudo docker inspect --format '{{.Config.Image}}' "$OLD_CID"
-sudo docker inspect --format '{{.Image}}' "$OLD_CID"
+CID=$(tfe ps -q app)
+[ -n "$CID" ] || { echo "СТОП: контейнер app не найден"; exit 1; }
+sudo docker inspect --format 'image={{.Config.Image}} id={{.Image}} started={{.State.StartedAt}} restarts={{.RestartCount}}' "$CID"
 sudo cat "$D/compose/deploy.env"
+echo "строк DB_NULL_POOL=true в app.env: $(sudo grep -c '^DB_NULL_POOL=true$' "$D/config/app.env")"
+sudo ls -ln "$D/config/app.env"
 curl -sS http://192.168.1.97:18080/api/v1/health/ready
+echo
+)
 ```
 
-- Первая `inspect` показывает имя образа, с которым контейнер реально создан. **Это и есть образ для
-  отката** — запишите его. По NAS-FIRST-INSTALL это был бы `time-for-everything:nas-20261009-114259`,
-  но верите выводу команды.
-- Вторая — ID этого образа (`sha256:…`), тоже запишите.
-- `TFE_IMAGE` в `deploy.env` должен совпадать с первой строкой. Если не совпадает — файл меняли
-  без пересоздания контейнера; остановитесь и разберитесь, прежде чем продолжать.
-- `ready` до обновления должен быть `ready` с `schema: ok`. Если уже сейчас что-то не так,
-  запишите ответ: так вы сможете отличить прежнюю проблему от новой.
+- `image=` показывает образ, с которым контейнер реально создан. **Это образ для отката, запишите его**,
+  вместе с `id=sha256:…`. Ожидается `time-for-everything:nas-20261010-210507-620e834`. Если там другое
+  значение, верьте выводу команды, а не документации, и прежде чем продолжать, разберитесь.
+- `TFE_IMAGE` в `deploy.env` должен совпадать с `image=`. Если не совпадает, остановитесь.
+- `deploy.env` секретов не содержит. Из `app.env` выводится **только число** строк `DB_NULL_POOL=true`
+  (ожидается `1`), а также владелец и права (ожидаются `-rw-------` и `10001 10001`). Содержимое
+  `app.env` не выводится.
+- `ready` до обновления сохраните, чтобы потом отличить прежнюю проблему от новой.
 
-В `deploy.env` нет секретов, его можно показывать. `app.env` на экран не выводим.
-
-### 4.2. Резервные копии файлов конфигурации на NAS
+### 4.2. Резервные копии `deploy.env` и compose
 
 ```sh
+(
+D=/volume1/docker/time-for-everything_deploy
+cd "$D/compose" || { echo "СТОП: нет $D/compose"; exit 1; }
 TS=$(date +%Y%m%d-%H%M%S)
-sudo cp -p "$D/compose/deploy.env" "$D/compose/deploy.env.bak-$TS"
-sudo cp -p "$D/compose/compose.production.yaml" "$D/compose/compose.production.yaml.bak-$TS"
-sudo ls -l "$D/compose/"
-echo "$TS"
+sudo test -e "deploy.env.bak-$TS" && { echo "СТОП: копия с таким TS уже есть, повторите через секунду"; exit 1; }
+sudo cp -p deploy.env "deploy.env.bak-$TS" || { echo "СТОП: копия deploy.env не создана"; exit 1; }
+sudo cp -p compose.production.yaml "compose.production.yaml.bak-$TS" || { echo "СТОП: копия compose не создана"; exit 1; }
+sudo ls -l "deploy.env.bak-$TS" "compose.production.yaml.bak-$TS"
+echo "ОК: TS=$TS"
+)
 ```
 
-Запишите значение `TS`. `-p` сохраняет владельца и права. Резервную копию `app.env` делаем только если
-он будет меняться (раздел 6.4).
+**Запишите `TS`.** Копию `app.env` не делаем: файл не меняется. Его прежняя копия лежит в
+`~/tfe-rescue-20261012-123852` на Mac.
 
-### 4.3. Убедиться, что NAS-compose сохранил ваши правки
+### 4.3. Проверить, что NAS-compose сохранил ваши правки (только чтение)
 
 ```sh
+(
+D=/volume1/docker/time-for-everything_deploy
+cd "$D" || { echo "СТОП: нет $D"; exit 1; }
 sudo grep -nE 'ports:|192\.168\.1\.97|cpus|mem_limit|pids_limit' "$D/compose/compose.production.yaml"
 sudo grep -n 'TFE_HTTP_PORT' "$D/compose/deploy.env"
+ACTIVE_CPUS=$(sudo grep -cE '^[[:space:]]*cpus:' "$D/compose/compose.production.yaml")
+[ "$ACTIVE_CPUS" = "0" ] || { echo "СТОП: cpus не закомментирован"; exit 1; }
+sudo grep -qF '"192.168.1.97:${TFE_HTTP_PORT:-8000}:8000"' "$D/compose/compose.production.yaml" || { echo "СТОП: привязка к 192.168.1.97 не найдена"; exit 1; }
+sudo grep -qx 'TFE_HTTP_PORT=18080' "$D/compose/deploy.env" || { echo "СТОП: TFE_HTTP_PORT не 18080"; exit 1; }
+echo "ОК: compose и порт как ожидалось"
+)
 ```
 
 Ожидается примерно:
@@ -490,424 +566,265 @@ sudo grep -n 'TFE_HTTP_PORT' "$D/compose/deploy.env"
     # cpus: 1.0
     pids_limit: 128
 TFE_HTTP_PORT=18080
+ОК: compose и порт как ожидалось
 ```
 
-Если `cpus` **без** `#` или порт другой — **ничего не меняйте вслепую**: значит, compose на NAS уже
-не тот, что описан в NAS-FIRST-INSTALL, сначала разберитесь.
+Если что-то не совпало, **ничего не правьте вслепую**: значит, compose на NAS уже другой.
 
 ### 4.4. Проверить архив и загрузить образ
 
-Задайте **своё** имя тега из раздела 2 (замените пример):
-
 ```sh
-TFE_TAG=nas-20261010-101500-abc1234
+(
+TFE_TAG='ВСТАВЬТЕ_TFE_TAG'
+T=/volume1/docker/tfe-transfer
+cd "$T" || { echo "СТОП: нет $T"; exit 1; }
 NEW_IMAGE="time-for-everything:$TFE_TAG"
 TAR="time-for-everything-$TFE_TAG.tar"
-```
-
-```sh
+[ -s "$TAR" ] && [ -s "$TAR.sha256" ] && [ -s "build-info-$TFE_TAG.txt" ] || { echo "СТОП: нет файлов для тега $TFE_TAG"; exit 1; }
 df -h /volume1
-cd "$T"
 cat "build-info-$TFE_TAG.txt"
-sha256sum -c "$TAR.sha256"
-```
-
-Ожидается `time-for-everything-nas-…tar: OK`. **Только после `OK`:**
-
-```sh
-sudo docker load -i "$T/$TAR"
-sudo docker image inspect --format '{{.Os}}/{{.Architecture}}' "$NEW_IMAGE"
+sha256sum -c "$TAR.sha256" || { echo "СТОП: контрольная сумма не совпала, образ не загружаем"; exit 1; }
+sudo docker load -i "$T/$TAR" || { echo "СТОП: docker load не удался"; exit 1; }
+ARCH=$(sudo docker image inspect --format '{{.Os}}/{{.Architecture}}' "$NEW_IMAGE") || { echo "СТОП: образ $NEW_IMAGE не найден после загрузки"; exit 1; }
+[ "$ARCH" = "linux/amd64" ] || { echo "СТОП: платформа $ARCH"; exit 1; }
 sudo docker image ls time-for-everything
+echo "ОК: загружен $NEW_IMAGE"
+)
 ```
 
-Нужны `Loaded image: time-for-everything:nas-…` с вашим тегом и `linux/amd64`. В списке образов
-должны быть **оба**: образ для отката из раздела 4.1 и новый.
+- В `build-info` должна быть строка `APP_SHA=` с SHA из раздела 1.7 и строка
+  `APP_BRANCH=recovery/provisioning-diagnostics`.
+- В списке образов должны быть **оба**: образ для отката из раздела 4.1 и новый.
 
 ---
 
 ## 5. Миграции базы — в этом релизе не требуются
 
-**Для этого обновления раздел пропускается целиком.** Раздел 2.1 показывает
-`schema_version=20261006000002` и только две исходные миграции; базу не трогаем, `DATABASE_URL` на Mac
-не вводим, `pg_dump` не нужен. Переходите к разделу 6.
+Раздел 2.1 показывает `schema_version=20261006000002` и только две исходные миграции. Работающая установка
+отвечает `schema: ok` на ту же версию. Значит:
 
-Ниже — общий порядок для **будущих** релизов, в которых появятся новые файлы
-`supabase/migrations/`. Это единственное место обновления, которое меняет данные Supabase.
-**Откат образа после миграций не откатывает базу.**
+- `scripts/db_migrate.py` **не запускается**, `DATABASE_URL` на Mac не вводится, `pg_dump` не нужен;
+- `scripts/db_reset.py` **не запускается никогда**: он удаляет данные;
+- диагностический патч не добавляет новых SQL-операций. Он только замеряет время уже существующих
+  `get`, `flush`, `commit` и `rollback`.
 
-### 5.0. Какие миграции новые — только от проверенной установленной версии
-
-Сравнивать нужно с версией кода, **действительно работающей на NAS**, а не с SHA из документации.
-
-1. На NAS в разделе 4.1 вы записали имя образа запущенного контейнера (`docker inspect`).
-2. Полный SHA этой версии берём из `build-info-<тот-же-тег>.txt` (на Mac в `~/tfe-transfer` или на NAS
-   в `/volume1/docker/tfe-transfer`). Первые 7 символов этого SHA должны совпадать с окончанием
-   тега `nas-<дата>-<sha7>`.
-3. **Если SHA нельзя подтвердить** (нет `build-info`, тег без SHA — как у образа первой установки
-   `nas-20261009-114259`, несовпадение sha7) — **остановитесь**. Не подставляйте SHA из инструкции
-   по памяти. В такой ситуации список допустимо определить только по самой базе — пробным
-   запуском из 5.2, без `--apply`, и с пониманием каждой ожидающей миграции.
-
-```sh
-INSTALLED_SHA=<полный SHA из build-info установленного тега>
-git -C "$APP" cat-file -e "$INSTALLED_SHA^{commit}" && \
-  git -C "$APP" diff --name-status "$INSTALLED_SHA" "$APP_SHA" -- supabase/migrations
-```
-
-- Только строки `A supabase/migrations/…sql` — новые миграции, продолжайте с 5.1.
-- `M` или `D` у старых миграций — остановитесь: уже применённые миграции менять нельзя.
-- `cat-file` с ошибкой (коммита нет в репозитории) — остановитесь.
-
-Окончательная истина о том, что будет применено, — список `Pending migrations` пробного запуска
-в 5.2: он читает журнал версий из самой базы. Он должен совпасть со списком `A` выше.
-
-### 5.1. Проверка на Mac без подключения
-
-**На Mac** (второе окно терминала; NAS-сессию не закрывайте). Рабочая копия должна точно
-соответствовать собранному коммиту:
-
-```sh
-cd /Users/fedor/RepoPrompt/time-for-everything
-/bin/bash --noprofile --norc
-git rev-parse HEAD
-git status --short -- supabase scripts backend/app/db
-backend/.venv/bin/python -I scripts/db_migrate.py --offline
-```
-
-`HEAD` должен совпадать с `APP_SHA` из `build-info`, `status` — пустой. Иначе миграции и образ будут от
-разных версий — остановитесь.
-
-### 5.2. Резервная копия — обязательна
-
-На Mac нет `pg_dump`. Нужен клиент PostgreSQL **не старше** версии сервера Supabase. Установка — ваше
-решение (например, `libpq` через Homebrew); проверьте `pg_dump --version`. **Без резервной копии
-миграцию не применяйте.**
-
-```sh
-read -r -s -p 'Вставьте DATABASE_URL и нажмите Enter: ' DATABASE_URL
-printf '\n'
-export DATABASE_URL
-backend/.venv/bin/python -I scripts/db_migrate.py
-```
-
-Проверьте строку `Target:` — **ваш** проект и pooler, и что в `Pending migrations` перечислены
-**только** новые файлы из раздела 5.0. Что-то другое — `unset DATABASE_URL` и остановитесь.
-
-**На NAS** остановите приложение, чтобы копия была согласованной:
-
-```sh
-tfe stop
-```
-
-**На Mac:**
-
-```sh
-mkdir -p "$HOME/.tfe-admin/backups"
-chmod 700 "$HOME/.tfe-admin/backups"
-umask 077
-PGDATABASE="$DATABASE_URL" pg_dump --schema=public -Fc \
-  -f "$HOME/.tfe-admin/backups/public-$(date +%Y%m%d-%H%M%S).dump"
-ls -l "$HOME/.tfe-admin/backups/"
-```
-
-Файл должен быть ненулевого размера. Это копия схемы `public` — **не** полная копия Supabase Auth.
-
-### 5.3. Применить
-
-```sh
-backend/.venv/bin/python -I scripts/db_migrate.py --apply
-backend/.venv/bin/python -I scripts/db_migrate.py
-unset DATABASE_URL
-```
-
-Ожидается `Applied …` для каждой новой миграции, затем `Schema is up to date.`
-При ошибке: **не запускайте старый контейнер вслепую и не используйте `db_reset.py`**.
-Каждая миграция идёт в своей транзакции; ошибочная откатывается целиком, но предыдущие уже применены.
-Остановитесь и разберите сообщение.
-
-Переходите к разделу 6 (приложение на NAS пока остановлено).
+Если в 2.1 схема другая, это другой релиз. Остановитесь: порядок для миграций сюда сознательно не включён.
 
 ---
 
 ## 6. Переключить NAS на новый образ
 
-**На NAS**, в той же SSH-сессии (`tfe`, `D`, `NEW_IMAGE` заданы). Если подключение обрывалось,
-снова выполните блоки из начала раздела 4 и 4.4 (только переменные, без `docker load`).
-
-### 6.1. Заменить только TFE_IMAGE
+### 6.1. Заменить только `TFE_IMAGE`
 
 ```sh
-sudo sed -i "s|^TFE_IMAGE=.*|TFE_IMAGE=$NEW_IMAGE|" "$D/compose/deploy.env"
-sudo cat "$D/compose/deploy.env"
+(
+TFE_TAG='ВСТАВЬТЕ_TFE_TAG'
+TS='ВСТАВЬТЕ_TS_ИЗ_4.2'
+D=/volume1/docker/time-for-everything_deploy
+cd "$D/compose" || { echo "СТОП: нет $D/compose"; exit 1; }
+NEW_IMAGE="time-for-everything:$TFE_TAG"
+sudo docker image inspect "$NEW_IMAGE" >/dev/null || { echo "СТОП: образ $NEW_IMAGE не загружен"; exit 1; }
+sudo test -f "deploy.env.bak-$TS" || { echo "СТОП: нет резервной копии deploy.env.bak-$TS"; exit 1; }
+sudo sed -i "s|^TFE_IMAGE=.*|TFE_IMAGE=$NEW_IMAGE|" deploy.env || { echo "СТОП: sed не выполнен"; exit 1; }
+CUR=$(sudo grep '^TFE_IMAGE=' deploy.env)
+[ "$CUR" = "TFE_IMAGE=$NEW_IMAGE" ] || { echo "СТОП: TFE_IMAGE не тот. Верните копию: sudo cp -p $D/compose/deploy.env.bak-$TS $D/compose/deploy.env"; exit 1; }
+sudo grep -qx 'TFE_HTTP_PORT=18080' deploy.env || { echo "СТОП: пропал TFE_HTTP_PORT=18080, верните копию"; exit 1; }
+sudo cat deploy.env
+echo "ОК: TFE_IMAGE заменён"
+)
 ```
 
-Ожидается ровно три строки, изменилась только первая:
+Ожидаются три строки, изменилась только первая:
 
 ```dotenv
-TFE_IMAGE=time-for-everything:nas-…-…
+TFE_IMAGE=time-for-everything:nas-…-<sha7>
 TFE_HTTP_PORT=18080
 TFE_CONFIG_FILE=/volume1/docker/time-for-everything_deploy/config/app.env
 ```
 
-Если результат другой — верните копию:
-`sudo cp -p "$D/compose/deploy.env.bak-$TS" "$D/compose/deploy.env"` и отредактируйте через
-`sudo vi -n "$D/compose/deploy.env"` (как в NAS-FIRST-INSTALL, шаг 11).
+Возврат копии командой `sudo cp -p …bak-$TS …deploy.env` перезаписывает `deploy.env` его же прежней
+версией. Это не удаление.
 
-### 6.2. Проверить конфигурацию до запуска
-
-```sh
-tfe config -q
-tfe config | grep -nE 'image:|host_ip|published|target: 8000|cpus'
-```
-
-- `config -q` — без вывода и без ошибки.
-- Должны быть `image: time-for-everything:nas-…` (новый), `host_ip: 192.168.1.97`,
-  `published: "18080"`. Строки `cpus` быть **не должно**.
-
-`tfe config` выводит только compose-настройки; содержимое `app.env` в него не попадает.
-
-### 6.3. Пересоздать контейнер
+### 6.2. Проверить конфигурацию и пересоздать контейнер
 
 ```sh
-tfe up -d --no-build --pull never
+(
+TFE_TAG='ВСТАВЬТЕ_TFE_TAG'
+D=/volume1/docker/time-for-everything_deploy
+cd "$D" || { echo "СТОП: нет $D"; exit 1; }
+tfe() { sudo docker compose --project-name time-for-everything_deploy --env-file "$D/compose/deploy.env" -f "$D/compose/compose.production.yaml" "$@"; }
+NEW_IMAGE="time-for-everything:$TFE_TAG"
+[ "$(sudo grep '^TFE_IMAGE=' "$D/compose/deploy.env")" = "TFE_IMAGE=$NEW_IMAGE" ] || { echo "СТОП: в deploy.env не новый TFE_IMAGE, сначала 6.1"; exit 1; }
+sudo grep -qx 'TFE_HTTP_PORT=18080' "$D/compose/deploy.env" || { echo "СТОП: TFE_HTTP_PORT не 18080"; exit 1; }
+sudo grep -qF '"192.168.1.97:${TFE_HTTP_PORT:-8000}:8000"' "$D/compose/compose.production.yaml" || { echo "СТОП: привязка к 192.168.1.97 не найдена"; exit 1; }
+ACTIVE_CPUS=$(sudo grep -cE '^[[:space:]]*cpus:' "$D/compose/compose.production.yaml")
+[ "$ACTIVE_CPUS" = "0" ] || { echo "СТОП: cpus не закомментирован"; exit 1; }
+sudo grep -nE '^[[:space:]]*image:|192\.168\.1\.97|cpus' "$D/compose/compose.production.yaml"
+tfe config -q || { echo "СТОП: compose-конфигурация с ошибкой"; exit 1; }
+tfe up -d --no-build --pull never || { echo "СТОП: tfe up завершился с ошибкой"; exit 1; }
+tfe ps
+echo "ОК: контейнер пересоздан"
+)
 ```
 
-Compose видит, что образ изменился, и пересоздаёт только контейнер `app`.
-`--pull never` — образ берётся из загруженного, Docker Hub не используется.
-Предупреждение `PIDs limit discarded` для этого NAS ожидаемо; **другие ошибки не игнорируйте**.
+- Итоговую конфигурацию (`tfe config` без `-q`) **не выводим**: в ней собраны все подставленные значения,
+  и печатать её незачем. Проверка правильности — только `tfe config -q`: без вывода и без ошибки.
+- Порт, адрес и `cpus` проверяются по **исходным** файлам `deploy.env` и `compose.production.yaml`. Секретов
+  в них нет. Ожидается строка `image: ${TFE_IMAGE:?…}`, строка с `"192.168.1.97:${TFE_HTTP_PORT:-8000}:8000"`
+  и `# cpus: 1.0`.
+- Compose пересоздаёт только контейнер `app`. `--pull never` означает, что Docker Hub не используется.
+  Предупреждение `PIDs limit discarded` на этом NAS ожидаемо.
+- `--force-recreate` не нужен: образ изменился, а `app.env` нет.
 
-Если в разделе 5 приложение было остановлено, эта же команда его запустит.
+### 6.3. `app.env` не меняется, `DB_NULL_POOL=true` остаётся
 
-### 6.4. Новые настройки `app.env` — необязательные
-
-**Для обновления в `app.env` ничего добавлять не нужно.** Релиз добавляет параметры
-подключения к базе; если строки нет, действует значение по умолчанию из кода
-(`backend/app/core/config.py`; список с комментариями — `backend/.env.example`).
-
-**Существующие строки не меняйте**, особенно согласованный HTTP-вариант:
-`APP_ENV=development`, `APP_BASE_URL=http://192.168.1.97:18080`, `COOKIE_SECURE=false`. Шаблоны
-`backend/.env.example` и `config/app.env.example` используют `production`/HTTPS-значения — из них **нельзя**
-копировать файл целиком поверх вашего `app.env`.
-
-| Ключ | По умолчанию | Допустимо | Что делает |
-|---|---|---|---|
-| `DB_CONNECT_TIMEOUT_SECONDS` | `5` | 1–60 | libpq `connect_timeout`: ограничивает **только установление соединения**, не длительность запроса |
-| `DB_TCP_KEEPALIVES` | `true` | true/false | TCP keepalive: замечает «молча умершее» сетевое соединение |
-| `DB_TCP_KEEPALIVES_IDLE_SECONDS` | `30` | 1–7200 | libpq `keepalives_idle` |
-| `DB_TCP_KEEPALIVES_INTERVAL_SECONDS` | `10` | 1–600 | libpq `keepalives_interval` |
-| `DB_TCP_KEEPALIVES_COUNT` | `3` | 1–30 | libpq `keepalives_count` |
-| `DB_TCP_USER_TIMEOUT_MS` | `30000` | 0–600000 | libpq `tcp_user_timeout` (действует на Linux, то есть в контейнере на NAS); `0` — значение ОС |
-| `DB_MAX_OVERFLOW` | пусто = как `DB_POOL_SIZE` | 0–50 | Дополнительные соединения сверх пула |
-| `DB_POOL_TIMEOUT_SECONDS` | `30` | 1–300 | Сколько ждать свободное соединение из пула |
-| `DB_POOL_RECYCLE_SECONDS` | `1800` | 60–86400 | Переоткрывать соединения старше этого срока |
-| `DB_POOL_PRE_PING` | `true` | true/false | Проверять соединение перед выдачей из пула |
-| `DB_NULL_POOL` | `false` | true/false | **Только диагностика**: новое соединение на каждый запрос, настройки пула игнорируются, медленнее |
-| `DB_READY_TIMEOUT_SECONDS` | `10` | 0.1–120 | Сколько `/api/v1/health/ready` ждёт проверку базы, потом отвечает `database: timeout` |
-
-Важные особенности:
-
-- **Параметры соединения перекрывают одноимённые параметры внутри `DATABASE_URL`.** `connect_timeout`,
-  `keepalives`, `keepalives_idle`, `keepalives_interval`, `keepalives_count`, `tcp_user_timeout` всегда
-  передаются из настроек `DB_*`, включая значения по умолчанию. Если такой параметр
-  когда-то дописывали в строку подключения, теперь задавайте его **явно** через `DB_*`. В строке из
-  NAS-FIRST-INSTALL был только `?sslmode=require` — он не затрагивается.
-  Во время диагностики в ваш URL добавлялись keepalive-параметры. Чтобы сохранить именно
-  те значения, задайте в `app.env` отдельные строки (без изменения пароля или URL):
-
-  ```dotenv
-  DB_TCP_KEEPALIVES=true
-  DB_TCP_KEEPALIVES_IDLE_SECONDS=10
-  DB_TCP_KEEPALIVES_INTERVAL_SECONDS=5
-  DB_TCP_KEEPALIVES_COUNT=3
-  DB_TCP_USER_TIMEOUT_MS=15000
-  ```
-
-  Это не гарантирует восстановление связи с БД. Проверяйте настройки в редакторе,
-  а не выводом `app.env` на экран.
-- Ни один из этих параметров не ограничивает общую длительность запроса: keepalive и
-  `tcp_user_timeout` лишь обнаруживают мёртвый сетевой путь, медленный, но живой сервер они не обрывают.
-- `DB_NULL_POOL=true` — инструмент диагностики (исключить «зависшие» соединения пула), **не
-  гарантированное исправление**. Включайте его только на время разбора проблемы и
-  затем верните `false` (или удалите строку).
-- Значение вне допустимого диапазона — `ConfigError` при старте, контейнер не запустится
-  (в сообщении — имя настройки, без значения).
-
-**Рекомендуемый порядок:** сначала обновите образ с неизменным `app.env` и пройдите
-раздел 7. Меняйте `DB_*` потом, **по одной настройке** и только если есть причина,
-чтобы было понятно, что именно повлияло.
-
-Если решили задать настройку (на NAS):
-
-```sh
-sudo cp -p "$D/config/app.env" "$D/config/app.env.bak-$TS"
-sudo vi -n "$D/config/app.env"
-```
-
-В `vi`: `i` → допишите **новую** строку в конец, например `DB_READY_TIMEOUT_SECONDS=10` → **Esc** →
-`:wq` → Enter. Старые строки не трогайте. Затем:
-
-```sh
-sudo chown 10001:10001 "$D/config/app.env"
-sudo chmod 600 "$D/config/app.env"
-sudo ls -ln "$D/config/app.env"
-tfe up -d --no-build --pull never --force-recreate
-```
-
-Ожидается `-rw-------` и `10001 10001`. `--force-recreate` нужен: само изменение `app.env` Compose
-не замечает. После этого — снова раздел 7.1. `install-config.sh` для существующего
-файла **не запускайте** — он откажется перезаписывать, и это правильно.
-
-При откате на старый образ новые строки `DB_*` мешать не будут: неизвестные ключи
-игнорируются (`extra="ignore"`).
+- В этом релизе новых настроек нет. **Не редактируйте `app.env`**, не запускайте `install-config.sh` и
+  не копируйте шаблоны поверх файла.
+- `DB_NULL_POOL=true` был включён раньше для диагностики. В этом режиме каждый запрос открывает **новое**
+  соединение с базой, а настройки пула не действуют. Режим оставлен, чтобы условия совпадали с теми, в
+  которых наблюдался таймаут входа, и диагностика их не меняла. Учтите это при чтении лога: время на
+  установку соединения (TCP, TLS, аутентификация в Supabase) попадает в подэтап
+  `ensure_profile.profile_get` (подробнее в [LOGIN-DIAGNOSTICS.md](LOGIN-DIAGNOSTICS.md)).
+- Вернуть пул (`false` или удалить строку) — **отдельное решение после разбора лога**, не часть этого
+  обновления.
+- Согласованный HTTP-вариант (`APP_ENV=development`, `APP_BASE_URL=http://192.168.1.97:18080`,
+  `COOKIE_SECURE=false`) не меняется.
 
 ---
 
 ## 7. Проверка после обновления
 
-### 7.1. Контейнер и база (на NAS)
+### 7.1. Контейнер, образ, база (на NAS)
 
 ```sh
+(
+TFE_TAG='ВСТАВЬТЕ_TFE_TAG'
+D=/volume1/docker/time-for-everything_deploy
+cd "$D" || { echo "СТОП: нет $D"; exit 1; }
+tfe() { sudo docker compose --project-name time-for-everything_deploy --env-file "$D/compose/deploy.env" -f "$D/compose/compose.production.yaml" "$@"; }
+NEW_IMAGE="time-for-everything:$TFE_TAG"
 tfe ps
-```
-
-Сначала `health: starting`; через 20–30 секунд повторите — нужно `(healthy)` и
-`192.168.1.97:18080->8000/tcp`.
-
-Убедитесь, что запущен **именно новый** образ:
-
-```sh
-NEW_CID=$(tfe ps -q app)
-sudo docker inspect --format '{{.Config.Image}}' "$NEW_CID"
-sudo docker inspect --format '{{.Image}}' "$NEW_CID"
-sudo docker image inspect --format '{{.Id}}' "$NEW_IMAGE"
-```
-
-Первая строка — новый тег; вторая и третья должны совпадать. (ID сравнивайте только на NAS: на Mac
-Docker Desktop может показывать другой формат ID.)
-
-```sh
+CID=$(tfe ps -q app)
+[ -n "$CID" ] || { echo "СТОП: контейнер app не найден"; exit 1; }
+RUN_IMAGE=$(sudo docker inspect --format '{{.Config.Image}}' "$CID")
+RUN_ID=$(sudo docker inspect --format '{{.Image}}' "$CID")
+WANT_ID=$(sudo docker image inspect --format '{{.Id}}' "$NEW_IMAGE")
+echo "image=$RUN_IMAGE"
+[ "$RUN_IMAGE" = "$NEW_IMAGE" ] && [ -n "$WANT_ID" ] && [ "$RUN_ID" = "$WANT_ID" ] || { echo "СТОП: запущен не новый образ"; exit 1; }
 curl -sS http://192.168.1.97:18080/api/v1/health/live
+echo
 curl -sS http://192.168.1.97:18080/api/v1/health/ready
+echo
+tfe logs --tail 30 app
+echo "ОК: запущен $NEW_IMAGE"
+)
 ```
 
-Ожидается:
+Сначала `tfe ps` покажет `health: starting`. Через 20–30 секунд повторите блок: должно быть `(healthy)` и
+`192.168.1.97:18080->8000/tcp`. Ожидаются ответы:
 
 ```json
 {"status":"ok"}
 {"status":"ready","checks":{"database":"ok","schema":"ok","auth":"configured"},"setup":[]}
 ```
 
-| Ответ | Значение |
+| Ответ | Что значит |
 |---|---|
-| `schema: outdated` / `missing` | В этом релизе не ожидается (схема не менялась). Не запускайте миграции вслепую — откат (раздел 8) и разбор |
-| `database: timeout` | База не ответила за `DB_READY_TIMEOUT_SECONDS` (10 с). Повторите через минуту; если сохраняется — сеть/TLS до Supabase |
-| `database: unreachable` | Сеть, TLS или учётные данные. Если `app.env` не трогали, сравните с ответом `ready` до обновления (раздел 4.1) |
-| `database: error` | Ошибка проверки БД (права, схема) — см. поле `diagnostics` и лог |
-| поле `diagnostics` | Содержит только категорию, имя класса ошибки и SQLSTATE, без паролей — им можно делиться при разборе |
-| нет ответа / контейнер перезапускается | `tfe logs --tail 50 app`; ищите `ConfigError` (например, недопустимое значение `DB_*`), `Traceback` |
+| `schema: outdated` / `missing` | В этом релизе не ожидается. Миграции вслепую не запускать: откат (раздел 8) и разбор |
+| `database: timeout` / `unreachable` | Сравните с `ready` до обновления (4.1). `app.env` не менялся, поэтому скорее всего это та же сетевая проблема, а не новый образ |
+| Контейнер перезапускается | Смотрите `tfe logs --tail 50 app`, ищите `ConfigError` и `Traceback` |
+
+В логе должна быть строка `Application startup complete`. Паролей лог не содержит, но перед отправкой
+кому-либо просмотрите его.
+
+### 7.2. Вход (в браузере)
+
+1. Откройте **http://192.168.1.97:18080/** и обновите страницу без кэша: **⌘ + Shift + R**.
+2. Сделайте **одну** попытку входа тестовым аккаунтом и запишите время.
+3. Прочитайте лог этой попытки по [LOGIN-DIAGNOSTICS.md](LOGIN-DIAGNOSTICS.md). Это главная цель релиза.
+4. Если вход удался, выполните одно изменяющее действие (запуск и остановка таймера) и обновите страницу.
+
+Красные `401` для `/api/v1/me` и `/api/v1/auth/refresh` до входа — норма. Ошибка
+`ERR_ADDRESS_UNREACHABLE` в Chrome или Brave означает, что в macOS не выдано разрешение «Локальная сеть»;
+к обновлению это не относится.
+
+**Помните:** релиз **диагностирует**, а не исправляет таймаут входа. Если вход по-прежнему не успевает за
+20 секунд, это ожидаемо, а результат обновления — строки лога.
+
+---
+
+## 8. Откат
+
+Миграций не было, `app.env` не менялся, поэтому откат — это просто возврат прежнего `TFE_IMAGE`.
 
 ```sh
-tfe logs --tail 50 app
+(
+OLD_IMAGE='ВСТАВЬТЕ_ОБРАЗ_ИЗ_4.1'
+D=/volume1/docker/time-for-everything_deploy
+cd "$D/compose" || { echo "СТОП: нет $D/compose"; exit 1; }
+tfe() { sudo docker compose --project-name time-for-everything_deploy --env-file "$D/compose/deploy.env" -f "$D/compose/compose.production.yaml" "$@"; }
+sudo docker image inspect --format '{{.Id}}' "$OLD_IMAGE" || { echo "СТОП: образа $OLD_IMAGE нет на NAS"; exit 1; }
+sudo sed -i "s|^TFE_IMAGE=.*|TFE_IMAGE=$OLD_IMAGE|" deploy.env || { echo "СТОП: sed не выполнен"; exit 1; }
+[ "$(sudo grep '^TFE_IMAGE=' deploy.env)" = "TFE_IMAGE=$OLD_IMAGE" ] || { echo "СТОП: TFE_IMAGE не тот"; exit 1; }
+sudo grep -qx 'TFE_HTTP_PORT=18080' deploy.env || { echo "СТОП: пропал TFE_HTTP_PORT"; exit 1; }
+tfe config -q || { echo "СТОП: compose-конфигурация с ошибкой"; exit 1; }
+tfe up -d --no-build --pull never || { echo "СТОП: tfe up с ошибкой"; exit 1; }
+tfe ps
+echo "ОК: возвращён $OLD_IMAGE"
+)
 ```
 
-Нормально: `Application startup complete`. Лог не содержит паролей, но перед отправкой кому-либо
-просмотрите его.
-
-### 7.2. Вход и работа (в браузере)
-
-1. Откройте **http://192.168.1.97:18080/** и обновите без кэша: **Command ⌘ + Shift + R**
-   (браузер мог запомнить старые файлы интерфейса).
-2. До входа красные `401` для `/api/v1/me` и `/api/v1/auth/refresh` в консоли — **норма**.
-3. Войдите **тестовым** аккаунтом. Должен открыться ваш профиль с прежними данными: звёзды, история,
-   занятия — они хранятся в Supabase и обновлением не затрагиваются.
-4. Выполните **одно изменяющее действие**, например запуск и остановку таймера. Это проверяет cookies и
-   CSRF: при неправильном адресе получили бы `403 csrf_failed`.
-5. Обновите страницу (⌘ + R) — сессия и запись сохранились.
-6. Проверьте новую функциональность этого обновления.
-7. Выйдите и войдите снова. Если есть взрослый аккаунт — войдите им и убедитесь, что ребёнок виден.
-
-Chrome/Brave с `ERR_ADDRESS_UNREACHABLE` — это разрешение «Локальная сеть» в macOS
-(NAS-FIRST-INSTALL, шаг 14), не ошибка обновления.
-
-**Обновление завершено**, когда пройдены 7.1 и 7.2. Сохраните `build-info-<тег>.txt` (на Mac и на NAS):
-в следующий раз он подтвердит SHA установленной версии (раздел 5.0).
+- `OLD_IMAGE` берите из вывода `image=` в разделе 4.1. Ожидается
+  `time-for-everything:nas-20261010-210507-620e834`. ID, который печатает первая команда, должен совпасть
+  с записанным `id=sha256:…`.
+- Вместо `sed` можно вернуть всю копию: `sudo cp -p "$D/compose/deploy.env.bak-<TS>" "$D/compose/deploy.env"`.
+- Затем проверьте, как в 7.1: `(healthy)` и `ready`. В блоке 7.1 подставьте прежний тег
+  (`nas-20261010-210507-620e834`).
 
 ---
 
-## 8. Откат на предыдущий образ
+## 9. Уборка — не выполняется
 
-### Когда откат безопасен
+В рамках этого обновления **ничего не удаляется**:
 
-| Ситуация | Можно просто вернуть образ? |
-|---|---|
-| Новых миграций не было — **случай этого релиза** | **Да** |
-| Миграции были | **Нет, не вслепую.** Старый `ready` покажет `schema: ok`, даже если новая схема ему не подходит. Варианты: исправить ошибку новой сборкой (предпочтительно) или восстановить БД из копии раздела 5.2 — данные, созданные после миграции, будут потеряны. Миграций «вниз» нет |
-| В `app.env` добавлены новые ключи | Да — старый образ их игнорирует. Если менялись **существующие** значения — верните `app.env.bak-…` |
+- временные выгрузки `tfe-scan-*` остаются в `$TMPDIR` (macOS очищает его сама);
+- архивы в `~/tfe-transfer` и `/volume1/docker/tfe-transfer` остаются;
+- старые образы на NAS остаются: среди них образ для отката;
+- файлы `*.bak-<TS>` на NAS остаются;
+- `~/tfe-rescue-20261012-123852` остаётся (приватно, `drwx------`).
 
-### Как откатить (на NAS)
-
-```sh
-OLD_IMAGE=<имя образа из docker inspect в разделе 4.1>
-sudo docker image inspect --format '{{.Id}}' "$OLD_IMAGE"
-sudo sed -i "s|^TFE_IMAGE=.*|TFE_IMAGE=$OLD_IMAGE|" "$D/compose/deploy.env"
-sudo cat "$D/compose/deploy.env"
-tfe config -q
-tfe up -d --no-build --pull never
-```
-
-Подставьте в `OLD_IMAGE` имя, которое **показал `docker inspect`** в разделе 4.1 (не из документации).
-ID из второй команды должен совпасть с записанным там же `sha256:…`. Вместо `sed` можно вернуть всю копию:
-`sudo cp -p "$D/compose/deploy.env.bak-$TS" "$D/compose/deploy.env"`.
-
-Затем проверка как в разделе 7: `tfe ps` → `(healthy)`, `ready`, вход, одно действие.
-Если меняли `app.env`: `sudo cp -p "$D/config/app.env.bak-$TS" "$D/config/app.env"` и
-`tfe up -d --no-build --pull never --force-recreate`.
+Если когда-нибудь понадобится место, это отдельное решение. Его принимают отдельно, вручную и не по этой
+инструкции.
 
 ---
 
-## 9. Уборка (через несколько дней, когда новая версия устоялась)
+## 10. Чего не делать
 
-- **Оставьте на NAS текущий и хотя бы один предыдущий образ.** Не используйте
-  `docker image prune -a` и `docker system prune` — они могут удалить образ для отката или образы
-  других приложений на NAS.
-- Удалять старые образы — только по точному имени:
-  `sudo docker image rm time-for-everything:<старый-тег>`, и только не тот, что указан в `deploy.env`.
-- Архивы в `/volume1/docker/tfe-transfer` можно удалить по точному имени после успешной проверки:
-  `sudo rm -- /volume1/docker/tfe-transfer/time-for-everything-<тег>.tar`. Старый
-  `time-for-everything.tar` от первой установки — аналогично. Копии на Mac в `~/tfe-transfer`
-  храните приватно, пока версия может понадобиться.
-- Файлы `*.bak-<TS>` в `compose/` удаляйте, когда откат к этим настройкам точно не нужен.
-  `app.env.bak-*` содержит секреты — не оставляйте его надолго.
-- Дампы базы в `~/.tfe-admin/backups` содержат личные данные: храните зашифрованно.
-
----
-
-## 10. Чего не делать при обновлении
-
-- `git add .`, `git commit -a`, `git push --force`.
-- Сборку из незакоммиченных файлов, `--worktree` или `docker build .` из корня репозитория.
-- Повторно использовать старый тег или удалять работающий образ, чтобы «освободить» имя.
-- Копировать `compose.production.yaml` с Mac поверх NAS-копии; менять порт 18080; раскомментировать
-  `cpus`; трогать `user`, `read_only`, `cap_drop`, `security_opt`, монтирование `app.env`.
-- Запускать `install-config.sh` повторно, удалять `app.env`, выводить его через `cat`.
-- `scripts/db_reset.py` — это удаление данных, не обновление.
-- `--apply` миграций без резервной копии и проверки строки `Target`.
-- `tfe down -v`, `tfe pull`, `docker system prune`, `docker image prune -a`.
+- `rm`, `rm -rf`, `git clean`, `git reset`, `git checkout -- .`, `git restore` без `--staged`, `git stash`.
+- `git add .`, `git add -A`, `git add -f`, `git commit -a`, `git push --force`, push в `main`.
+- Вставлять несколько блоков сразу, вставлять блок частично, дописывать `\`-переносы.
+- Собирать из незакоммиченных файлов (`--worktree`, `docker build .`); повторно использовать старый тег.
+- Копировать `compose.production.yaml` с Mac на NAS; менять порт 18080; раскомментировать `cpus`.
+- Редактировать, выводить или копировать `app.env`; запускать `install-config.sh`; выводить содержимое
+  `~/tfe-rescue-20261012-123852`.
+- `scripts/db_reset.py`, `scripts/db_migrate.py --apply`.
+- `tfe down`, `tfe down -v`, `tfe pull`, `docker system prune`, `docker image prune`, `docker image rm`.
 
 ---
 
 ## Краткая шпаргалка
 
-| Где | Шаг | Команда / действие |
+| Где | Шаг | Ожидаемый результат |
 |---|---|---|
-| Mac | Git | `status` → явный `git add -- <пути>` → `commit` → `push origin main` → CI зелёный |
-| Mac | Схема не менялась | `source-schema-version.sh` → `schema_version=20261006000002` (иначе стоп) |
-| Mac | Сборка | `BUILD_BUILDER=desktop-linux BUILD_PLATFORM=linux/amd64 sh scripts/build-local.sh --app-dir "$APP" --sha "$APP_SHA" --tag "$TFE_IMAGE"` |
-| Mac | Архив | `docker save` → `shasum -a 256` → `scp -O` в `/volume1/docker/tfe-transfer/` |
-| NAS | Снимок | записать `TFE_IMAGE`, `cp -p` для `deploy.env` и compose |
-| NAS | Загрузка | `sha256sum -c` → `docker load` → проверка `linux/amd64` |
-| — | Миграции | **В этом релизе нет.** Будущие — раздел 5, только от подтверждённого установленного SHA |
-| NAS | Настройки `DB_*` | Необязательны; `app.env` не меняем (раздел 6.4) |
-| NAS | Переключение | `sed` только `TFE_IMAGE` → `tfe config -q` → `tfe up -d --no-build --pull never` |
-| NAS+браузер | Проверка | `healthy`, `ready`, вход, одно действие, новая функция |
-| NAS | Откат | вернуть старый `TFE_IMAGE` → `tfe up -d --no-build --pull never` (только при той же схеме) |
+| Mac | 1.1 окружение | ветка `recovery/provisioning-diagnostics`, deploy `bcb583c` |
+| Mac | 1.3 тесты | `pytest exit=0`, `ruff exit=0` |
+| Mac | 1.4 индекс | `ОК: в индексе ровно шесть файлов` |
+| Mac | 1.5 / 1.6 / 1.7 скан | `scan_secrets: 0 finding(s), 0 HIGH`, `exit=0`; в 1.6 — `ОК: коммит создан из просканированного дерева …` |
+| Mac | 1.8 push | `ОК: на GitHub ветка … = <SHA>`, Source CI зелёный |
+| Mac | 2.1 перед сборкой | `schema_version=20261006000002`, все 13 имён этапов найдены |
+| Mac | 2.2 сборка | `ОК: TFE_TAG=nas-<дата>-<sha7>`, `linux/amd64` |
+| NAS | 4.1 снимок | `image=…nas-20261010-210507-620e834`, `DB_NULL_POOL=true` — 1 строка |
+| NAS | 4.4 загрузка | `…tar: OK`, `ОК: загружен …` |
+| NAS | 6.1–6.2 | только `TFE_IMAGE` изменён; `ОК: контейнер пересоздан` |
+| NAS | 7.1 | `(healthy)`, `ready`, `ОК: запущен <новый образ>` |
+| NAS | 8 откат | прежний `TFE_IMAGE`, `tfe up -d --no-build --pull never` |
