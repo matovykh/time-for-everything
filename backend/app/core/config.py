@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
     db_pool_recycle_seconds: int = Field(default=1800, ge=60, le=86400)
     db_pool_pre_ping: bool = True
-    # Diagnostic only: open a fresh connection per checkout (no pooling). Pool settings are then ignored.
+    # Optional opt-in (kept for deployments that already set it): open a fresh connection per checkout (no pooling);
+    # pool settings are then ignored. Default false = normal QueuePool with pre-ping, the recommended mode.
     db_null_pool: bool = False
     # libpq connect_timeout: bounds connection establishment per host attempt, NOT query duration.
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)

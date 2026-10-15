@@ -24,11 +24,9 @@ from sqlalchemy import Connection, Engine, create_engine, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
-from starlette.requests import Request
 
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiError
-from app.core.login_stages import db_dependency_stage
 from app.db.errors import (
     UNAVAILABLE_CATEGORIES,
     classify_db_error,
@@ -78,8 +76,8 @@ def build_engine(url: str, settings: Settings | None = None) -> Engine:
         "connect_args": pg_connect_args(settings),
     }
     if settings.db_null_pool:
-        # Diagnostic mode: every checkout opens (and every checkin closes) a real connection, so a
-        # stale pooled socket can be ruled out. Slower; pool settings do not apply.
+        # Opt-in DB_NULL_POOL: every checkout opens (and every checkin closes) a real connection.
+        # Slower; pool settings do not apply. Unset/false selects the normal pool below.
         return create_engine(url, poolclass=NullPool, **common)
     overflow = settings.db_pool_size if settings.db_max_overflow is None else settings.db_max_overflow
     return create_engine(
@@ -260,15 +258,13 @@ def get_optional_db() -> Iterator[Session | None]:
         session.close()
 
 
-def get_db(request: Request) -> Iterator[Session]:
-    # Endpoints marked with time_db_dependency (login) get a db_dependency stage around acquisition; else no-op.
-    with db_dependency_stage(request):
-        engine = get_engine()
-        if engine is None or _factory is None:
-            raise ApiError(503, "service_not_configured", "Сервер ещё не настроен: не задано подключение к БД.",
-                           details={"missing": get_settings().missing_settings()})
-        _ensure_schema(engine)
-        session = _factory()
+def get_db() -> Iterator[Session]:
+    engine = get_engine()
+    if engine is None or _factory is None:
+        raise ApiError(503, "service_not_configured", "Сервер ещё не настроен: не задано подключение к БД.",
+                       details={"missing": get_settings().missing_settings()})
+    _ensure_schema(engine)
+    session = _factory()
     try:
         yield session
     finally:
